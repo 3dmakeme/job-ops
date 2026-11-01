@@ -2,7 +2,10 @@
  * Service for AI-powered project selection for resumes.
  */
 
+import { logger } from "@infra/logger";
 import { stripHtmlTags } from "@shared/utils/string";
+import { shouldUseJev } from "./jev/client";
+import { pickTopProjectIds, rankProjectsWithJev } from "./jev/project-ranking";
 import type { JsonSchemaDefinition } from "./llm/types";
 import { createConfiguredLlmService, resolveLlmModel } from "./modelSelection";
 import type { ResumeProjectSelectionItem } from "./resumeProjects";
@@ -41,35 +44,52 @@ export async function pickProjectIdsForJob(args: {
 
   const jobDescription = stripHtmlTags(args.jobDescription);
   let selectedProjectIds: unknown[] = [];
-  try {
-    const [model, llm] = await Promise.all([
-      resolveLlmModel("projectSelection"),
-      createConfiguredLlmService("projectSelection"),
-    ]);
-    const result = await llm.callJson<{ selectedProjectIds: string[] }>({
-      model,
-      messages: [
-        {
-          role: "user",
-          content: buildProjectSelectionPrompt({
-            jobDescription,
-            projects: args.eligibleProjects,
-            desiredCount,
-          }),
-        },
-      ],
-      jsonSchema: PROJECT_SELECTION_SCHEMA,
-    });
-    selectedProjectIds =
-      result.success && Array.isArray(result.data?.selectedProjectIds)
-        ? result.data.selectedProjectIds
-        : [];
-  } catch {
-    return fallbackPickProjectIds(
-      jobDescription,
-      args.eligibleProjects,
-      desiredCount,
-    );
+  let rankedByJev = false;
+  if (await shouldUseJev("projectSelectionEngine")) {
+    try {
+      const ranked = await rankProjectsWithJev({
+        jobDescription,
+        projects: args.eligibleProjects,
+      });
+      selectedProjectIds = pickTopProjectIds(ranked, desiredCount);
+      rankedByJev = true;
+    } catch (error) {
+      logger.warn("Jev project ranking failed; using the configured LLM", {
+        error,
+      });
+    }
+  }
+  if (!rankedByJev) {
+    try {
+      const [model, llm] = await Promise.all([
+        resolveLlmModel("projectSelection"),
+        createConfiguredLlmService("projectSelection"),
+      ]);
+      const result = await llm.callJson<{ selectedProjectIds: string[] }>({
+        model,
+        messages: [
+          {
+            role: "user",
+            content: buildProjectSelectionPrompt({
+              jobDescription,
+              projects: args.eligibleProjects,
+              desiredCount,
+            }),
+          },
+        ],
+        jsonSchema: PROJECT_SELECTION_SCHEMA,
+      });
+      selectedProjectIds =
+        result.success && Array.isArray(result.data?.selectedProjectIds)
+          ? result.data.selectedProjectIds
+          : [];
+    } catch {
+      return fallbackPickProjectIds(
+        jobDescription,
+        args.eligibleProjects,
+        desiredCount,
+      );
+    }
   }
 
   const unique: string[] = [];
@@ -90,8 +110,8 @@ export async function pickProjectIdsForJob(args: {
     args.eligibleProjects,
     desiredCount,
   )) {
-    if (!seen.has(id)) unique.push(id);
     if (unique.length >= desiredCount) break;
+    if (!seen.has(id)) unique.push(id);
   }
 
   return unique;

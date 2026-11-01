@@ -57,6 +57,7 @@
     "@tiptap/react": "^3.22.2",
     "@tiptap/starter-kit": "^3.22.2",
     "@types/leaflet": "^1.9.16",
+    "@typesafe-ai/sdk": "^0.7.0",
     "@umami/node": "^0.4.0",
     "better-sqlite3": "^11.6.0",
     "browser-utils": "^0.0.1",

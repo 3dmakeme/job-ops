@@ -170,6 +170,16 @@ export const createAppSettings = (
     default: "classic",
     override: null,
   },
+  projectSelectionEngine: {
+    value: "llm",
+    default: "llm",
+    override: null,
+  },
+  emailRoutingEngine: {
+    value: "llm",
+    default: "llm",
+    override: null,
+  },
   pdfPaperSize: {
     value: "auto",
     default: "auto",

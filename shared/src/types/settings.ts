@@ -74,6 +74,14 @@ export const PDF_RENDERER_LABELS: Record<PdfRenderer, string> = {
 
 export type TypstTheme = (typeof TYPST_THEME_VALUES)[number];
 
+/** Which engine makes a narrow judgment call: the configured LLM or TypeSafe Jev. */
+export const JUDGMENT_ENGINE_VALUES = ["llm", "jev"] as const;
+export type JudgmentEngine = (typeof JUDGMENT_ENGINE_VALUES)[number];
+export const JUDGMENT_ENGINE_LABELS: Record<JudgmentEngine, string> = {
+  llm: "Configured LLM",
+  jev: "TypeSafe Jev",
+};
+
 export const PDF_PAPER_SIZE_VALUES = ["auto", "a4", "letter"] as const;
 export type PdfPaperSize = (typeof PDF_PAPER_SIZE_VALUES)[number];
 export const PDF_PAPER_SIZE_LABELS: Record<PdfPaperSize, string> = {
@@ -260,6 +268,8 @@ export interface AppSettings {
   resumeProjects: Resolved<ResumeProjectsSettings>;
   pdfRenderer: Resolved<PdfRenderer>;
   typstTheme: Resolved<TypstTheme>;
+  projectSelectionEngine: Resolved<JudgmentEngine>;
+  emailRoutingEngine: Resolved<JudgmentEngine>;
   pdfPaperSize: Resolved<PdfPaperSize>;
   ukvisajobsMaxJobs: Resolved<number>;
   adzunaMaxJobsPerTerm: Resolved<number>;

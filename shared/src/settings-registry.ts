@@ -15,6 +15,8 @@ import {
   type LlmProviderId,
   type LlmPurposeApiKeys,
   type LlmPurposeOverrides,
+  JUDGMENT_ENGINE_VALUES,
+  type JudgmentEngine,
   PDF_PAPER_SIZE_VALUES,
   PDF_RENDERER_VALUES,
   type PdfPaperSize,
@@ -212,6 +214,7 @@ const parseChatStyleManualLanguageOrNull = createEnumParser(
 const parsePdfRendererOrNull = createEnumParser(PDF_RENDERER_VALUES);
 const parseTypstThemeOrNull = createEnumParser(TYPST_THEME_VALUES);
 const parsePdfPaperSizeOrNull = createEnumParser(PDF_PAPER_SIZE_VALUES);
+const parseJudgmentEngineOrNull = createEnumParser(JUDGMENT_ENGINE_VALUES);
 
 const llmPurposeOverrideSchema = z.object({
   provider: z.preprocess(
@@ -453,6 +456,22 @@ export const settingsRegistry = {
     default: (): TypstTheme => "classic",
     parse: parseTypstThemeOrNull,
     serialize: (value: TypstTheme | null | undefined): string | null =>
+      value ?? null,
+  },
+  projectSelectionEngine: {
+    kind: "typed" as const,
+    schema: z.enum(JUDGMENT_ENGINE_VALUES),
+    default: (): JudgmentEngine => "llm",
+    parse: parseJudgmentEngineOrNull,
+    serialize: (value: JudgmentEngine | null | undefined): string | null =>
+      value ?? null,
+  },
+  emailRoutingEngine: {
+    kind: "typed" as const,
+    schema: z.enum(JUDGMENT_ENGINE_VALUES),
+    default: (): JudgmentEngine => "llm",
+    parse: parseJudgmentEngineOrNull,
+    serialize: (value: JudgmentEngine | null | undefined): string | null =>
       value ?? null,
   },
   pdfPaperSize: {

@@ -85,6 +85,19 @@ Each meter includes completed usage and work currently in progress. Limits reset
 - Changing the provider clears stale model overrides in the form, so inherited fields follow the new provider default unless you explicitly choose a new override
 - The preview under each field and the **Resolved config** block reflect the model currently selected in the form, even before you save
 
+### Judgment Engine
+
+Choose which engine makes two narrow judgment calls. Each has its own selector under **Settings → AI → Judgment Engine**:
+
+- **Project selection**: which resume projects fit a job.
+- **Email routing**: whether a post-application email is relevant, which stage it signals, and which job it belongs to.
+
+Options are **Configured LLM** (default) and **TypeSafe Jev**. Jev answers typed Choice, Score and yes/no questions quickly and cheaply, but it does not write text. Summaries, tailoring, scoring briefs, and Ghostwriter always use your configured LLM.
+
+Jev requires the `TYPESAFE_API_KEY` environment variable on the server (get a key at [console.typesafe.ai](https://console.typesafe.ai/keys)). If the key is missing, or a Jev call fails, JobOps falls back to the configured LLM so nothing is dropped.
+
+With Jev, email auto-linking only happens when the relevance, stage, and job judgments are all confident. Jev does not write the short note the LLM router can attach to a stage event.
+
 ### Webhooks
 
 ![Webhooks settings section](/img/features/settings-webhooks-section.png)

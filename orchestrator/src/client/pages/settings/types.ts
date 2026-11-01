@@ -57,6 +57,11 @@ export type BackupValues = {
   backupMaxCount: EffectiveDefault<number>;
 };
 
+export type JudgmentEngineValues = {
+  projectSelectionEngine: EffectiveDefault<"llm" | "jev">;
+  emailRoutingEngine: EffectiveDefault<"llm" | "jev">;
+};
+
 export type ScoringValues = {
   penalizeMissingSalary: EffectiveDefault<boolean>;
   missingSalaryPenalty: EffectiveDefault<number>;

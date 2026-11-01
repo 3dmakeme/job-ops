@@ -27,6 +27,7 @@ import { EnvironmentSettingsSection } from "@client/pages/settings/components/En
 import { ModelSettingsSection } from "@client/pages/settings/components/ModelSettingsSection";
 import { PromptTemplatesSection } from "@client/pages/settings/components/PromptTemplatesSection";
 import { ReactiveResumeSection } from "@client/pages/settings/components/ReactiveResumeSection";
+import { JudgmentEngineSection } from "@client/pages/settings/components/JudgmentEngineSection";
 import { ScoringSettingsSection } from "@client/pages/settings/components/ScoringSettingsSection";
 import { TracerLinksSettingsSection } from "@client/pages/settings/components/TracerLinksSettingsSection";
 import { WebhooksSection } from "@client/pages/settings/components/WebhooksSection";
@@ -81,6 +82,8 @@ const DEFAULT_FORM_VALUES: UpdateSettingsInput = {
   resumeProjects: null,
   pdfRenderer: "rxresume",
   typstTheme: "classic",
+  projectSelectionEngine: null,
+  emailRoutingEngine: null,
   pdfPaperSize: "auto",
   rxresumeBaseResumeId: null,
   showSponsorInfo: null,
@@ -133,6 +136,7 @@ type SettingsSectionId =
   | "model"
   | "chat"
   | "prompt-templates"
+  | "judgment-engines"
   | "scoring"
   | "reactive-resume"
   | "webhooks"
@@ -212,6 +216,20 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         description:
           "Base AI instructions for Ghostwriter, tailoring, and scoring.",
         searchTerms: ["prompt", "templates", "system prompt", "instructions"],
+      },
+      {
+        id: "judgment-engines",
+        label: "Judgment Engine",
+        description:
+          "Choose the configured LLM or TypeSafe Jev for selection and routing calls.",
+        searchTerms: [
+          "jev",
+          "typesafe",
+          "engine",
+          "project selection",
+          "email routing",
+          "cost",
+        ],
       },
     ],
   },
@@ -344,6 +362,7 @@ const SECTION_FIELD_MAP: Record<
     "tailoringPromptTemplate",
     "scoringPromptTemplate",
   ],
+  "judgment-engines": ["projectSelectionEngine", "emailRoutingEngine"],
   scoring: [
     "penalizeMissingSalary",
     "missingSalaryPenalty",
@@ -440,6 +459,8 @@ const NULL_SETTINGS_PAYLOAD: UpdateSettingsInput = {
   resumeProjects: null,
   pdfRenderer: null,
   typstTheme: null,
+  projectSelectionEngine: null,
+  emailRoutingEngine: null,
   pdfPaperSize: null,
   rxresumeBaseResumeId: null,
   showSponsorInfo: null,
@@ -508,6 +529,8 @@ const mapSettingsToForm = (data: AppSettings): UpdateSettingsInput => ({
   resumeProjects: data.resumeProjects.override,
   pdfRenderer: data.pdfRenderer.override ?? data.pdfRenderer.value,
   typstTheme: data.typstTheme.override ?? data.typstTheme.value,
+  projectSelectionEngine: data.projectSelectionEngine.override,
+  emailRoutingEngine: data.emailRoutingEngine.override,
   pdfPaperSize: data.pdfPaperSize.override ?? data.pdfPaperSize.value,
   rxresumeBaseResumeId: data.rxresumeBaseResumeId,
   showSponsorInfo: data.showSponsorInfo.override,
@@ -762,6 +785,16 @@ const getDerivedSettings = (settings: AppSettings | null) => {
         default: settings?.backupMaxCount?.default ?? 5,
       },
     },
+    judgmentEngines: {
+      projectSelectionEngine: {
+        effective: settings?.projectSelectionEngine?.value ?? "llm",
+        default: settings?.projectSelectionEngine?.default ?? "llm",
+      },
+      emailRoutingEngine: {
+        effective: settings?.emailRoutingEngine?.value ?? "llm",
+        default: settings?.emailRoutingEngine?.default ?? "llm",
+      },
+    },
     scoring: {
       penalizeMissingSalary: {
         effective: settings?.penalizeMissingSalary?.value ?? false,
@@ -987,6 +1020,7 @@ export const SettingsPage: React.FC = () => {
     profileProjects,
     backup,
     scoring,
+    judgmentEngines,
     promptTemplates,
   } = derived;
 
@@ -1291,6 +1325,14 @@ export const SettingsPage: React.FC = () => {
         backupMaxCount: nullIfSame(
           data.backupMaxCount,
           backup.backupMaxCount.default,
+        ),
+        projectSelectionEngine: nullIfSame(
+          data.projectSelectionEngine,
+          judgmentEngines.projectSelectionEngine.default,
+        ),
+        emailRoutingEngine: nullIfSame(
+          data.emailRoutingEngine,
+          judgmentEngines.emailRoutingEngine.default,
         ),
         penalizeMissingSalary: nullIfSame(
           data.penalizeMissingSalary,
@@ -1677,6 +1719,16 @@ export const SettingsPage: React.FC = () => {
       activeSectionContent = (
         <PromptTemplatesSection
           values={promptTemplates}
+          isLoading={isLoading}
+          isSaving={isSaving}
+          layoutMode="panel"
+        />
+      );
+      break;
+    case "judgment-engines":
+      activeSectionContent = (
+        <JudgmentEngineSection
+          values={judgmentEngines}
           isLoading={isLoading}
           isSaving={isSaving}
           layoutMode="panel"

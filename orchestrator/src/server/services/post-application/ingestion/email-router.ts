@@ -1,4 +1,7 @@
+import { logger } from "@infra/logger";
 import { withHostedUsageReservation } from "@server/services/hosted-usage";
+import { shouldUseJev } from "@server/services/jev/client";
+import { classifyEmailWithJev } from "@server/services/jev/email-routing";
 import type { JsonSchemaDefinition } from "@server/services/llm/types";
 import {
   createConfiguredLlmService,
@@ -148,6 +151,18 @@ export async function classifyWithSmartRouter(args: {
   emailText: string;
   activeJobs: Array<{ id: string; company: string; title: string }>;
 }): Promise<SmartRouterResult> {
+  if (await shouldUseJev("emailRoutingEngine")) {
+    try {
+      return await classifyEmailWithJev({
+        emailText: args.emailText.slice(0, ROUTER_EMAIL_CHAR_LIMIT),
+        jobs: buildIndexedActiveJobs(args.activeJobs),
+      });
+    } catch (error) {
+      logger.warn("Jev email routing failed; using the configured LLM", {
+        error,
+      });
+    }
+  }
   return withHostedUsageReservation({ action: "tailoring" }, async () => ({
     result: await classifyWithSmartRouterImpl(args),
     usedUnits: 1,
