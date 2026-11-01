@@ -169,6 +169,25 @@ export const updateJobSchema = z.object({
         });
       }
     }),
+  tailoredCompetencies: z
+    .string()
+    .optional()
+    .superRefine((value, ctx) => {
+      if (value === undefined || value.trim().length === 0) return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(value);
+      } catch {
+        parsed = null;
+      }
+      const result = z.array(z.string().max(1000)).max(30).safeParse(parsed);
+      if (!result.success) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "tailoredCompetencies must be a JSON array of strings",
+        });
+      }
+    }),
   selectedProjectIds: z.string().optional(),
   pdfPath: z.string().optional(),
   tracerLinksEnabled: z.boolean().optional(),

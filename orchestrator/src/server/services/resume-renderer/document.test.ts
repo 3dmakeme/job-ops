@@ -296,4 +296,47 @@ describe("normalizeResumeJsonToLatexDocument", () => {
       "Worked with <b>bold text</b> and <i>italic text</i>. Strip this div",
     ]);
   });
+
+  it("maps visible custom sections into renderer entries", () => {
+    const document = normalizeResumeJsonToLatexDocument({
+      basics: { name: "Jane" },
+      customSections: [
+        {
+          id: "c1",
+          title: "Core Competencies",
+          type: "awards",
+          hidden: false,
+          items: [
+            {
+              id: "i1",
+              hidden: false,
+              title: "AI Platforms",
+              awarder: "",
+              description: "<p>Embedded intelligence</p>",
+            },
+            { id: "i2", hidden: true, title: "Hidden", description: "x" },
+          ],
+        },
+        { id: "c2", title: "Secret", type: "summary", hidden: true, items: [] },
+        { id: "c3", title: "Empty", type: "summary", items: [] },
+      ],
+    });
+
+    expect(document.customSections).toEqual([
+      {
+        id: "c1",
+        title: "Core Competencies",
+        type: "awards",
+        entries: [
+          {
+            title: "AI Platforms",
+            subtitle: null,
+            date: null,
+            bullets: ["Embedded intelligence"],
+            url: undefined,
+          },
+        ],
+      },
+    ]);
+  });
 });

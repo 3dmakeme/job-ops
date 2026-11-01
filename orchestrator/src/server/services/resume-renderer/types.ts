@@ -95,6 +95,13 @@ export type LatexResumeOrderedSectionKey =
   | "volunteer"
   | "references";
 
+export interface LatexResumeCustomSection {
+  id: string;
+  title: string;
+  type: string;
+  entries: LatexResumeEntry[];
+}
+
 export interface LatexResumeDocument {
   name: string;
   headline?: string | null;
@@ -115,6 +122,7 @@ export interface LatexResumeDocument {
   publications: LatexResumeEntry[];
   volunteer: LatexResumeEntry[];
   references: LatexResumeEntry[];
+  customSections?: LatexResumeCustomSection[];
   sectionOrder?: LatexResumeOrderedSectionKey[];
   sectionTitles?: LatexResumeSectionTitles;
 }

@@ -43,6 +43,8 @@ import {
   resolveResumeProjectsSettings,
 } from "../services/resumeProjects";
 import { LlmNotConfiguredError } from "../services/scorer";
+import { getCurrentDesignResumeOrNullOnLegacy } from "../services/design-resume";
+import { extractCompetencyLines } from "../services/rxresume/tailoring";
 import { generateTailoring } from "../services/summary";
 import {
   type PendingChallenge,
@@ -773,6 +775,7 @@ export async function summarizeJob(
       let tailoredSummary = job.tailoredSummary;
       let tailoredHeadline = job.tailoredHeadline;
       let tailoredSkills = job.tailoredSkills;
+      let tailoredCompetencies = job.tailoredCompetencies;
       const requestedFields = options?.fields;
       const shouldUpdateAllTailoring = !requestedFields?.length;
       const shouldUpdateSummary =
@@ -792,9 +795,14 @@ export async function summarizeJob(
       ) {
         jobLogger.info("Generating tailoring content");
         await reserveTailoringUsage();
+        const baseResume = await getCurrentDesignResumeOrNullOnLegacy();
+        const baseCompetencies = baseResume
+          ? extractCompetencyLines(baseResume.resumeJson)
+          : [];
         const tailoringResult = await generateTailoring(
           job.jobDescription || "",
           profile,
+          { baseCompetencies },
         );
         if (tailoringResult.success && tailoringResult.data) {
           tailoringUsageSucceeded = true;
@@ -806,6 +814,11 @@ export async function summarizeJob(
           }
           if (shouldUpdateSkills) {
             tailoredSkills = JSON.stringify(tailoringResult.data.skills);
+            if (tailoringResult.data.competencies?.length) {
+              tailoredCompetencies = JSON.stringify(
+                tailoringResult.data.competencies,
+              );
+            }
           }
         } else if (
           options?.force ||
@@ -892,6 +905,9 @@ export async function summarizeJob(
         ...(shouldUpdateSkills
           ? { tailoredSkills: tailoredSkills ?? undefined }
           : {}),
+        ...(shouldUpdateSkills && tailoredCompetencies
+          ? { tailoredCompetencies }
+          : {}),
         ...(shouldUpdateProjects
           ? { selectedProjectIds: selectedProjectIds ?? undefined }
           : {}),
@@ -975,6 +991,9 @@ export async function generateFinalPdf(
           summary: job.tailoredSummary || "",
           headline: job.tailoredHeadline || "",
           skills: job.tailoredSkills ? JSON.parse(job.tailoredSkills) : [],
+          competencies: job.tailoredCompetencies
+            ? JSON.parse(job.tailoredCompetencies)
+            : null,
         },
         job.jobDescription || "",
         undefined, // deprecated baseResumePath parameter

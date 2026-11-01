@@ -206,6 +206,7 @@ export interface Job {
   tailoredSummary: string | null; // Generated resume summary
   tailoredHeadline: string | null; // Generated resume headline
   tailoredSkills: string | null; // Generated resume skills (JSON)
+  tailoredCompetencies: string | null; // Generated core competencies (JSON array of strings)
   selectedProjectIds: string | null; // Comma-separated IDs of selected projects
   pdfPath: string | null; // Path to generated PDF
   pdfSource: JobPdfSource | null; // Whether PDF was system-generated or user-uploaded
@@ -568,6 +569,7 @@ export interface UpdateJobInput {
   tailoredSummary?: string;
   tailoredHeadline?: string;
   tailoredSkills?: string;
+  tailoredCompetencies?: string;
   selectedProjectIds?: string;
   pdfPath?: string;
   pdfSource?: JobPdfSource | null;

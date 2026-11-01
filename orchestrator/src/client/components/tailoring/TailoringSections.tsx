@@ -44,6 +44,9 @@ interface TailoringSectionsProps {
   headline: string;
   jobDescription: string;
   skillsDraft: EditableSkillGroup[];
+  /** Core competencies, one "Title — description" per line. Hidden when empty. */
+  competenciesText?: string;
+  onCompetenciesChange?: (value: string) => void;
   selectedIds: Set<string>;
   resumeProjectsSettings?: ResumeProjectsSettings | null;
   isResumeProjectsSettingsLoading?: boolean;
@@ -309,6 +312,8 @@ export const TailoringSections: React.FC<TailoringSectionsProps> = ({
   headline,
   jobDescription,
   skillsDraft,
+  competenciesText = "",
+  onCompetenciesChange,
   selectedIds,
   resumeProjectsSettings,
   isResumeProjectsSettingsLoading = false,
@@ -617,6 +622,37 @@ export const TailoringSections: React.FC<TailoringSectionsProps> = ({
           />
         </AccordionContent>
       </AccordionItem>
+
+      {competenciesText.trim().length > 0 && onCompetenciesChange ? (
+        <AccordionItem value="competencies" className={sectionClass}>
+          <AccordionTrigger
+            className={triggerClass}
+            aria-label="Core Competencies"
+          >
+            <SectionTriggerLabel
+              title="Core Competencies"
+              state={sectionStateForText(competenciesText)}
+              count={competenciesText.split("\n").filter(Boolean).length}
+            />
+          </AccordionTrigger>
+          <AccordionContent className="px-3 pb-3 pt-3">
+            <label htmlFor="tailor-competencies-edit" className="sr-only">
+              Core Competencies
+            </label>
+            <textarea
+              id="tailor-competencies-edit"
+              className={cn(inputClass, "min-h-40 leading-relaxed")}
+              value={competenciesText}
+              onChange={(event) => onCompetenciesChange(event.target.value)}
+              placeholder={"Title — description (one per line)"}
+              disabled={disableInputs}
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground/70">
+              One competency per line. Generated with the skills.
+            </p>
+          </AccordionContent>
+        </AccordionItem>
+      ) : null}
 
       <AccordionItem value="skills" className={sectionClass}>
         <AccordionTrigger className={triggerClass} aria-label="Tailored Skills">

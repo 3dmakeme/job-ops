@@ -2,6 +2,7 @@ import type { ChatStyleManualLanguage } from "@shared/types";
 import type {
   LatexResumeContactItem,
   LatexResumeCustomFieldItem,
+  LatexResumeCustomSection,
   LatexResumeDocument,
   LatexResumeEntry,
   LatexResumeInterestItem,
@@ -466,6 +467,61 @@ function buildReferenceEntries(resumeJson: RecordLike): LatexResumeEntry[] {
   );
 }
 
+const CUSTOM_ITEM_TITLE_KEYS = [
+  "title",
+  "name",
+  "company",
+  "school",
+  "organization",
+  "language",
+  "network",
+] as const;
+const CUSTOM_ITEM_SUBTITLE_KEYS = [
+  "awarder",
+  "issuer",
+  "publisher",
+  "position",
+  "degree",
+  "location",
+] as const;
+
+function buildCustomSectionEntry(item: RecordLike): LatexResumeEntry {
+  const firstText = (keys: readonly string[]) =>
+    keys.map((key) => toText(item[key]).trim()).find(Boolean) ?? "";
+  const keywords = asArray(item.keywords)
+    .map((keyword) => toText(keyword).trim())
+    .filter(Boolean);
+  const bullets = extractBullets(item.content || item.description);
+  const subtitle =
+    firstText(CUSTOM_ITEM_SUBTITLE_KEYS) || keywords.join(", ") || null;
+  return {
+    title: firstText(CUSTOM_ITEM_TITLE_KEYS),
+    subtitle,
+    date: toText(item.date || item.period) || null,
+    bullets,
+    url: toText(getByPath(item, "website.url")) || undefined,
+  };
+}
+
+export function buildCustomSections(
+  resumeJson: RecordLike,
+): LatexResumeCustomSection[] {
+  return asArray(resumeJson.customSections)
+    .map((section) => asRecord(section) ?? {})
+    .filter((section) => !toBoolean(section.hidden, false))
+    .map((section, index) => ({
+      id: toText(section.id, `custom-${index + 1}`),
+      title: toText(section.title).trim(),
+      type: toText(section.type, "summary"),
+      entries: asArray(section.items)
+        .map((item) => asRecord(item) ?? {})
+        .filter((item) => !toBoolean(item.hidden, false))
+        .map(buildCustomSectionEntry)
+        .filter((entry) => entry.title || entry.bullets.length > 0),
+    }))
+    .filter((section) => section.title && section.entries.length > 0);
+}
+
 export function getLatexResumeSectionTitles(
   language: ChatStyleManualLanguage = "english",
 ): LatexResumeSectionTitles {
@@ -504,6 +560,7 @@ export function normalizeResumeJsonToLatexDocument(
     publications: buildPublicationEntries(record),
     volunteer: buildVolunteerEntries(record),
     references: buildReferenceEntries(record),
+    customSections: buildCustomSections(record),
     sectionOrder: getOrderedSectionKeys(record),
     sectionTitles: {
       profiles: getSectionTitle(record, "profiles", titles),

@@ -275,6 +275,7 @@ export const jobs = sqliteTable(
     tailoredSummary: text("tailored_summary"),
     tailoredHeadline: text("tailored_headline"),
     tailoredSkills: text("tailored_skills"),
+    tailoredCompetencies: text("tailored_competencies"),
     selectedProjectIds: text("selected_project_ids"),
     pdfPath: text("pdf_path"),
     pdfSource: text("pdf_source", { enum: ["generated", "uploaded"] }),

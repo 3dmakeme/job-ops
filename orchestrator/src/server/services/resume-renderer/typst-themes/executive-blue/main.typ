@@ -187,6 +187,68 @@
   d.contains("present") or d.contains("current")
 }
 
+
+// ---- custom sections -----------------------------------------------------
+#let custom-sections = list-of(source.at("customSections", default: ()))
+#let title-matches(section, pattern) = item-text(section, "title").match(regex(pattern)) != none
+#let is-competencies(section) = title-matches(section, "(?i)competenc")
+#let is-impact(section) = title-matches(section, "(?i)impact|transformation")
+#let is-callout(section) = title-matches(section, "(?i)journey|career summary")
+#let competency-sections = custom-sections.filter(is-competencies)
+#let impact-sections = custom-sections.filter(is-impact)
+#let callout-sections = custom-sections.filter(is-callout)
+#let other-sections = custom-sections.filter(s => not is-competencies(s) and not is-impact(s) and not is-callout(s))
+
+// One entry as a single line of text: "Title — bullet text".
+#let entry-inline(entry) = {
+  let title = item-text(entry, "title")
+  let sub = item-text(entry, "subtitle")
+  let body = bullets-of(entry).join(" ")
+  let head = if title != "" and sub != "" { title + " — " + sub } else { title + sub }
+  if head != "" and body != [] and body != "" [#head — #body] else if head != "" [#head] else [#body]
+}
+
+#let competency-list(section) = {
+  set text(size: 8.8pt)
+  set list(spacing: 0.5em)
+  list(..list-of(section.at("entries", default: ())).map(entry-inline))
+}
+
+#let impact-strip(section) = {
+  let items = list-of(section.at("entries", default: ())).map(entry-inline)
+  block(width: 100%, fill: panel-grey, inset: (x: 12pt, y: 10pt), radius: 3pt, breakable: false)[
+    #text(size: 10pt, weight: "bold", fill: navy)[#upper(item-text(section, "title"))]
+    #v(0.35em)
+    #set text(size: 8.6pt, fill: muted)
+    #grid(
+      columns: (1fr, 1fr, 1fr),
+      column-gutter: 12pt,
+      row-gutter: 0.6em,
+      ..items.map(i => [#text(fill: blue, size: 7pt)[▸] #h(3pt) #i]),
+    )
+  ]
+}
+
+#let callout-panel(section) = block(
+  width: 100%, fill: panel-blue, stroke: (left: 3pt + navy),
+  inset: (x: 12pt, y: 10pt), radius: (right: 3pt), breakable: false,
+)[
+  #text(size: 9.5pt, weight: "bold", fill: navy)[#item-text(section, "title")]
+  #v(0.3em)
+  #set text(size: 8.8pt)
+  #list-of(section.at("entries", default: ())).map(entry-inline).join(parbreak())
+]
+
+#let custom-box(section) = grey-box(
+  item-text(section, "title"),
+  {
+    set text(size: 8.6pt)
+    for entry in list-of(section.at("entries", default: ())) {
+      block(below: 0.45em)[#entry-inline(entry)]
+    }
+  },
+)
+
 // ---- header band (page 1 only, full bleed) -------------------------------
 #context {
   let w = page.width
@@ -256,6 +318,10 @@
       #set par(justify: false, leading: 0.55em)
       #text(size: 9pt, fill: muted)[#markup-text(summary)]
     ]
+    #for section in competency-sections [
+      #section-heading(item-text(section, "title"))
+      #competency-list(section)
+    ]
   ],
   sidebar,
 )
@@ -268,6 +334,11 @@
   #v(0.6em)
   #section-heading(title-for("experience", "Current Role & Impact"))
   #current-role-box(experience.at(0))
+]
+
+#for section in impact-sections [
+  #v(0.7em)
+  #impact-strip(section)
 ]
 
 #if rest.len() > 0 [
@@ -299,6 +370,15 @@
     grey-box(title-for(key, fallback), entry-lines(entries))
   }
 }
+
+#for section in callout-sections [
+  #v(0.9em)
+  #callout-panel(section)
+]
+#for section in other-sections [
+  #v(0.9em)
+  #custom-box(section)
+]
 
 #extra-entries("education", "Education")
 #extra-entries("certifications", "Certifications")

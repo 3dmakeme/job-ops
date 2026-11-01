@@ -178,6 +178,10 @@ const pipelineRunsHasConfigSnapshot = tableHasColumn(
 );
 const pipelineRunsHasTenantId = tableHasColumn("pipeline_runs", "tenant_id");
 const jobsHasPdfRegenerating = tableHasColumn("jobs", "pdf_regenerating");
+const jobsHasTailoredCompetencies = tableHasColumn(
+  "jobs",
+  "tailored_competencies",
+);
 const jobsHasJobBrief = tableHasColumn("jobs", "job_brief");
 const watchlistJobStatesHasUserId = tableHasColumn(
   "watchlist_job_states",
@@ -323,6 +327,7 @@ const migrations = [
     tailored_summary TEXT,
     tailored_headline TEXT,
     tailored_skills TEXT,
+    tailored_competencies TEXT,
     selected_project_ids TEXT,
     pdf_path TEXT,
     pdf_source TEXT CHECK(pdf_source IN ('generated', 'uploaded')),
@@ -853,6 +858,7 @@ const migrations = [
   `ALTER TABLE jobs ADD COLUMN selected_project_ids TEXT`,
   `ALTER TABLE jobs ADD COLUMN tailored_headline TEXT`,
   `ALTER TABLE jobs ADD COLUMN tailored_skills TEXT`,
+  `ALTER TABLE jobs ADD COLUMN tailored_competencies TEXT`,
   `ALTER TABLE jobs ADD COLUMN tracer_links_enabled INTEGER NOT NULL DEFAULT 0`,
   `ALTER TABLE jobs ADD COLUMN pdf_source TEXT CHECK(pdf_source IN ('generated', 'uploaded'))`,
   `ALTER TABLE jobs ADD COLUMN pdf_regenerating INTEGER NOT NULL DEFAULT 0`,
@@ -984,6 +990,7 @@ const migrations = [
     tailored_summary TEXT,
     tailored_headline TEXT,
     tailored_skills TEXT,
+    tailored_competencies TEXT,
     selected_project_ids TEXT,
     pdf_path TEXT,
     pdf_source TEXT CHECK(pdf_source IN ('generated', 'uploaded')),
@@ -1008,7 +1015,7 @@ const migrations = [
     company_revenue, company_description, skills, experience_range, company_rating, company_reviews_count,
     vacancy_count, work_from_home_type, title, employer, employer_url, job_url, application_link, disciplines,
     deadline, salary, location, location_evidence, degree_required, starting, job_description, status, outcome, closed_at,
-    suitability_score, suitability_reason, job_brief, tailored_summary, tailored_headline, tailored_skills,
+    suitability_score, suitability_reason, job_brief, tailored_summary, tailored_headline, tailored_skills, tailored_competencies,
     selected_project_ids, pdf_path, pdf_source, pdf_regenerating, pdf_fingerprint, pdf_generated_at, tracer_links_enabled, sponsor_match_score, sponsor_match_names, discovered_at, processed_at,
     ready_at,
     applied_at, created_at, updated_at
@@ -1020,7 +1027,7 @@ const migrations = [
     company_revenue, company_description, skills, experience_range, company_rating, company_reviews_count,
     vacancy_count, work_from_home_type, title, employer, employer_url, job_url, application_link, disciplines,
     deadline, salary, location, location_evidence, degree_required, starting, job_description, status, outcome, closed_at,
-    suitability_score, suitability_reason, ${jobsHasJobBrief ? "job_brief" : "NULL"}, tailored_summary, tailored_headline, tailored_skills,
+    suitability_score, suitability_reason, ${jobsHasJobBrief ? "job_brief" : "NULL"}, tailored_summary, tailored_headline, tailored_skills, ${jobsHasTailoredCompetencies ? "tailored_competencies" : "NULL"},
     selected_project_ids, pdf_path, pdf_source, ${jobsHasPdfRegenerating ? "pdf_regenerating" : "0"}, pdf_fingerprint, pdf_generated_at, tracer_links_enabled, sponsor_match_score, sponsor_match_names, discovered_at, processed_at,
     ready_at,
     applied_at, created_at, updated_at

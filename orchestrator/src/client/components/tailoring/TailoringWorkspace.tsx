@@ -33,6 +33,8 @@ import {
   getTailoringSavePayloadKey,
   type TailoringSavePayload,
   useTailoringDraft,
+  competenciesToJson,
+  competenciesToText,
 } from "./useTailoringDraft";
 
 interface TailoringWorkspaceBaseProps {
@@ -117,6 +119,9 @@ const toSavePayloadFromJob = (job: Job): TailoringSavePayload => ({
   tailoredSummary: job.tailoredSummary ?? "",
   tailoredHeadline: job.tailoredHeadline ?? "",
   tailoredSkills: normalizeSkillsJson(job.tailoredSkills),
+  tailoredCompetencies: competenciesToJson(
+    competenciesToText(job.tailoredCompetencies),
+  ),
   jobDescription: job.jobDescription ?? "",
   selectedProjectIds: job.selectedProjectIds ?? "",
   tracerLinksEnabled: Boolean(job.tracerLinksEnabled),
@@ -143,6 +148,8 @@ export const TailoringWorkspace: React.FC<TailoringWorkspaceProps> = (
     openSkillGroupId,
     setOpenSkillGroupId,
     skillsJson,
+    competenciesText,
+    setCompetenciesText,
     isDirty,
     savedPayloadKey,
     applyIncomingDraft,
@@ -211,6 +218,7 @@ export const TailoringWorkspace: React.FC<TailoringWorkspaceProps> = (
       tailoredSummary: summary,
       tailoredHeadline: headline,
       tailoredSkills: skillsJson,
+      tailoredCompetencies: competenciesToJson(competenciesText),
       jobDescription,
       selectedProjectIds: selectedIdsCsv,
       tracerLinksEnabled,
@@ -219,6 +227,7 @@ export const TailoringWorkspace: React.FC<TailoringWorkspaceProps> = (
       summary,
       headline,
       skillsJson,
+      competenciesText,
       jobDescription,
       selectedIdsCsv,
       tracerLinksEnabled,
@@ -564,6 +573,8 @@ export const TailoringWorkspace: React.FC<TailoringWorkspaceProps> = (
       undoDisabledReason: canUseOriginalValues
         ? null
         : "Original base CV unavailable.",
+      competenciesText,
+      onCompetenciesChange: setCompetenciesText,
       onDescriptionChange: setJobDescription,
       onSkillGroupOpenChange: setOpenSkillGroupId,
       onAddSkillGroup: handleAddSkillGroup,
@@ -605,6 +616,8 @@ export const TailoringWorkspace: React.FC<TailoringWorkspaceProps> = (
       originalValues,
       skillsJson,
       aiBaseline,
+      competenciesText,
+      setCompetenciesText,
       setJobDescription,
       setOpenSkillGroupId,
       handleAddSkillGroup,

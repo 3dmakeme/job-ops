@@ -68,6 +68,7 @@ export type JobListItemWithPdfFreshnessInput = JobListItem &
     | "tailoredSummary"
     | "tailoredHeadline"
     | "tailoredSkills"
+    | "tailoredCompetencies"
     | "selectedProjectIds"
     | "jobDescription"
     | "jobBrief"
@@ -157,6 +158,7 @@ export async function getJobListItems(
     tailoredSummary: jobs.tailoredSummary,
     tailoredHeadline: jobs.tailoredHeadline,
     tailoredSkills: jobs.tailoredSkills,
+    tailoredCompetencies: jobs.tailoredCompetencies,
     selectedProjectIds: jobs.selectedProjectIds,
     jobDescription: jobs.jobDescription,
     jobBrief: jobs.jobBrief,
@@ -899,6 +901,7 @@ function mapRowToJob(row: typeof jobs.$inferSelect): Job {
     tailoredSummary: row.tailoredSummary,
     tailoredHeadline: row.tailoredHeadline ?? null,
     tailoredSkills: row.tailoredSkills ?? null,
+    tailoredCompetencies: row.tailoredCompetencies ?? null,
     selectedProjectIds: row.selectedProjectIds ?? null,
     pdfPath: row.pdfPath,
     pdfSource: row.pdfSource ?? null,

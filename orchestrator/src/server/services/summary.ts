@@ -27,6 +27,8 @@ export interface TailoredData {
   summary: string;
   headline: string;
   skills: Array<{ name: string; keywords: string[] }>;
+  /** Present only when the base resume has a core-competencies section. */
+  competencies?: string[];
 }
 
 export interface TailoringResult {
@@ -75,29 +77,69 @@ const TAILORING_SCHEMA: JsonSchemaDefinition = {
   },
 };
 
+function buildTailoringSchema(
+  baseCompetencies: string[],
+): JsonSchemaDefinition {
+  if (baseCompetencies.length === 0) return TAILORING_SCHEMA;
+  const schema = TAILORING_SCHEMA.schema;
+  return {
+    ...TAILORING_SCHEMA,
+    schema: {
+      ...schema,
+      properties: {
+        ...schema.properties,
+        competencies: {
+          type: "array",
+          description:
+            'Core competencies rewritten for the job, each as "Title — description"',
+          items: { type: "string" },
+        },
+      },
+      required: [...schema.required, "competencies"],
+    },
+  };
+}
+
+function buildCompetenciesInstruction(baseCompetencies: string[]): string {
+  return [
+    "",
+    "Core competencies:",
+    `The candidate's resume has ${baseCompetencies.length} core competencies, one per line below. Also return them as the "competencies" array, tailored to this job:`,
+    '- Keep each entry in the form "Title — description" (use the " — " separator).',
+    "- Put the competencies most relevant to the job description first, and mirror its terminology where it is truthful.",
+    "- Use only facts already present in the candidate's competencies, experience and projects. Do not invent claims, numbers or tools.",
+    `- Return exactly ${baseCompetencies.length} entries.`,
+    "",
+    ...baseCompetencies.map((line) => `- ${line}`),
+  ].join("\n");
+}
+
 /**
- * Generate tailored resume content (summary, headline, skills) for a job.
+ * Generate tailored resume content (summary, headline, skills, and optionally
+ * core competencies) for a job.
  */
 export async function generateTailoring(
   jobDescription: string,
   profile: ResumeProfile,
+  options: { baseCompetencies?: string[] } = {},
 ): Promise<TailoringResult> {
+  const baseCompetencies = options.baseCompetencies ?? [];
   const [model, writingStyle, aiProfile] = await Promise.all([
     resolveLlmModel("tailoring"),
     getWritingStyle(),
     filterProfileProjectsForAi(profile),
   ]);
-  const prompt = await buildTailoringPrompt(
-    aiProfile,
-    jobDescription,
-    writingStyle,
-  );
+  const prompt =
+    (await buildTailoringPrompt(aiProfile, jobDescription, writingStyle)) +
+    (baseCompetencies.length > 0
+      ? buildCompetenciesInstruction(baseCompetencies)
+      : "");
 
   const llm = await createConfiguredLlmService("tailoring");
   const result = await llm.callJson<TailoredData>({
     model,
     messages: [{ role: "user", content: prompt }],
-    jsonSchema: TAILORING_SCHEMA,
+    jsonSchema: buildTailoringSchema(baseCompetencies),
   });
 
   if (!result.success) {
@@ -113,7 +155,7 @@ export async function generateTailoring(
     };
   }
 
-  const { summary, headline, skills } = result.data;
+  const { summary, headline, skills, competencies } = result.data;
 
   // Basic validation
   if (!summary || !headline || !Array.isArray(skills)) {
@@ -126,6 +168,14 @@ export async function generateTailoring(
       summary: sanitizeText(summary || ""),
       headline: sanitizeText(headline || ""),
       skills: skills || [],
+      ...(baseCompetencies.length > 0 && Array.isArray(competencies)
+        ? {
+            competencies: competencies
+              .filter((line): line is string => typeof line === "string")
+              .map((line) => sanitizeText(line))
+              .filter(Boolean),
+          }
+        : {}),
     },
   };
 }

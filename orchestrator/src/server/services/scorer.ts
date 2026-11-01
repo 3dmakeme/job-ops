@@ -195,6 +195,7 @@ const NON_SOURCE_JOB_FIELDS = new Set<keyof Job>([
   "tailoredSummary",
   "tailoredHeadline",
   "tailoredSkills",
+  "tailoredCompetencies",
   "selectedProjectIds",
   "pdfPath",
   "pdfSource",

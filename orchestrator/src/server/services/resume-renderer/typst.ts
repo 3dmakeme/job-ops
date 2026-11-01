@@ -713,6 +713,10 @@ export function convertDocFieldsToTypst(
     publications: doc.publications.map(convertEntry),
     volunteer: doc.volunteer.map(convertEntry),
     references: doc.references.map(convertEntry),
+    customSections: doc.customSections?.map((section) => ({
+      ...section,
+      entries: section.entries.map(convertEntry),
+    })),
   };
 }
 

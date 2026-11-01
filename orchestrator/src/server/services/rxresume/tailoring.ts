@@ -10,10 +10,13 @@ export type TailoredSkillsInput =
   | null
   | undefined;
 
+export type TailoredCompetenciesInput = string[] | string | null | undefined;
+
 export type TailorChunkInput = {
   headline?: string | null;
   summary?: string | null;
   skills?: TailoredSkillsInput;
+  competencies?: TailoredCompetenciesInput;
 };
 
 export type ResumeProjectSelectionItem = ResumeProjectCatalogItem & {
@@ -249,11 +252,113 @@ export function applyProjectVisibility(args: {
   }
 }
 
+const COMPETENCIES_TITLE_PATTERN = /competenc/i;
+const COMPETENCY_SEPARATOR = " — ";
+
+function findCompetenciesSection(resumeData: RecordLike): RecordLike | null {
+  const sections = asArray(resumeData.customSections) ?? [];
+  for (const raw of sections) {
+    const section = asRecord(raw);
+    if (
+      section &&
+      typeof section.title === "string" &&
+      COMPETENCIES_TITLE_PATTERN.test(section.title) &&
+      Array.isArray(section.items)
+    ) {
+      return section;
+    }
+  }
+  return null;
+}
+
+function competencyItemToLine(item: RecordLike): string {
+  const head = [item.title, item.name].find(
+    (v): v is string => typeof v === "string" && v.trim().length > 0,
+  );
+  const body = [item.description, item.content].find(
+    (v): v is string => typeof v === "string" && v.trim().length > 0,
+  );
+  const text = body ? stripHtmlTags(body).trim() : "";
+  if (head && text) return `${head.trim()}${COMPETENCY_SEPARATOR}${text}`;
+  return head?.trim() || text;
+}
+
+/** Core competencies of the base resume as "Title — description" lines. */
+export function extractCompetencyLines(resumeData: RecordLike): string[] {
+  const section = findCompetenciesSection(resumeData);
+  if (!section) return [];
+  return (asArray(section.items) ?? [])
+    .map((raw) => asRecord(raw))
+    .filter((item): item is RecordLike => Boolean(item) && item?.hidden !== true)
+    .map(competencyItemToLine)
+    .filter(Boolean);
+}
+
+export function parseTailoredCompetencies(
+  value: TailoredCompetenciesInput,
+): string[] | null {
+  if (!value) return null;
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(parsed)) return null;
+  const lines = parsed
+    .filter((v): v is string => typeof v === "string")
+    .map((v) => v.trim())
+    .filter(Boolean);
+  return lines.length > 0 ? lines : null;
+}
+
+export function applyTailoredCompetencies(
+  resumeData: RecordLike,
+  competencies?: TailoredCompetenciesInput,
+): void {
+  const lines = parseTailoredCompetencies(competencies);
+  if (!lines) return;
+  const section = findCompetenciesSection(resumeData);
+  if (!section) return;
+  const existing = (asArray(section.items) ?? [])
+    .map((raw) => asRecord(raw))
+    .filter((item): item is RecordLike => Boolean(item));
+  const template = existing[0];
+  if (!template) return;
+
+  section.items = lines.map((line) => {
+    const separatorIndex = line.indexOf(COMPETENCY_SEPARATOR);
+    const head =
+      separatorIndex >= 0 ? line.slice(0, separatorIndex).trim() : line;
+    const tail =
+      separatorIndex >= 0
+        ? line.slice(separatorIndex + COMPETENCY_SEPARATOR.length).trim()
+        : "";
+    const next: RecordLike = { ...template, hidden: false };
+    if ("id" in next) next.id = createId();
+    if ("title" in template || "name" in template) {
+      const key = "title" in template ? "title" : "name";
+      next[key] = head;
+      if ("description" in template) next.description = tail ? `<p>${tail}</p>` : "";
+      else if ("content" in template) next.content = tail ? `<p>${tail}</p>` : "";
+    } else if ("content" in template) {
+      next.content = `<p>${line}</p>`;
+    }
+    return next;
+  });
+}
+
 export function applyTailoredChunks(args: {
   resumeData: RecordLike;
   tailoredContent: TailorChunkInput;
 }): void {
   applyTailoredSkills(args.resumeData, args.tailoredContent.skills);
+  applyTailoredCompetencies(
+    args.resumeData,
+    args.tailoredContent.competencies,
+  );
   applyTailoredSummary(args.resumeData, args.tailoredContent.summary);
   applyTailoredHeadline(args.resumeData, args.tailoredContent.headline);
 }

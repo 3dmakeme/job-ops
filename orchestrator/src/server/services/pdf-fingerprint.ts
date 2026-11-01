@@ -18,6 +18,7 @@ type JobPdfFingerprintInput = Pick<
   | "tailoredSummary"
   | "tailoredHeadline"
   | "tailoredSkills"
+  | "tailoredCompetencies"
   | "selectedProjectIds"
   | "jobDescription"
   | "tracerLinksEnabled"
@@ -103,6 +104,10 @@ export function createJobPdfFingerprint(
       tailoredSummary: job.tailoredSummary ?? null,
       tailoredHeadline: job.tailoredHeadline ?? null,
       tailoredSkills: job.tailoredSkills ?? null,
+      // Only hashed when set, so fingerprints of existing PDFs stay valid.
+      ...(job.tailoredCompetencies
+        ? { tailoredCompetencies: job.tailoredCompetencies }
+        : {}),
       selectedProjectIds: job.selectedProjectIds ?? null,
       jobDescription: job.jobDescription ?? null,
       tracerLinksEnabled: Boolean(job.tracerLinksEnabled),

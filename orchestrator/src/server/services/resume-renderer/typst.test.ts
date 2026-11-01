@@ -551,6 +551,31 @@ describe("typst resume renderer", () => {
         document: {
           ...baseDocument,
           skillGroups: [{ name: "Data", keywords: ["Snowflake", "dbt"] }],
+          customSections: [
+            {
+              id: "c1",
+              title: "Core Competencies",
+              type: "awards",
+              entries: [
+                {
+                  title: "AI Platforms",
+                  bullets: ["Embedded <strong>intelligence</strong>"],
+                },
+              ],
+            },
+            {
+              id: "c2",
+              title: "Transformation Impact",
+              type: "summary",
+              entries: [{ title: "", bullets: ["3x faster delivery"] }],
+            },
+            {
+              id: "c3",
+              title: "Career Journey Summary",
+              type: "summary",
+              entries: [{ title: "", bullets: ["25+ years"] }],
+            },
+          ],
           experience: [
             {
               title: "Acme, London",
