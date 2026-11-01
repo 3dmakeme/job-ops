@@ -1,0 +1,7 @@
+{
+  "id": "executive-blue",
+  "label": "Executive Blue",
+  "description": "A designed multi-page CV: gradient header band, sidebar, boxed current role and experience timeline.",
+  "kind": "adapted",
+  "entrypoint": "main.typ"
+}

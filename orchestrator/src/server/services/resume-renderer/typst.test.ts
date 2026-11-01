@@ -541,6 +541,44 @@ describe("typst resume renderer", () => {
   );
 
   it.skipIf(!typstAvailable())(
+    "renders the executive-blue theme with a boxed current role and timeline",
+    async () => {
+      const tempDir = await createTempDir();
+      tempDirs.push(tempDir);
+      const outputPath = join(tempDir, "executive-blue.pdf");
+
+      await renderTypstPdf({
+        document: {
+          ...baseDocument,
+          skillGroups: [{ name: "Data", keywords: ["Snowflake", "dbt"] }],
+          experience: [
+            {
+              title: "Acme, London",
+              subtitle: "Head of Data",
+              date: "Sept 2023 - Present",
+              bullets: ["Led <strong>platform</strong> delivery", "Scaled team"],
+            },
+            {
+              title: "Globex",
+              subtitle: "Architect (Contract)",
+              date: "2018 - 2022",
+              bullets: ["Built a greenfield platform"],
+            },
+          ],
+        },
+        outputPath,
+        jobId: "job-render-executive-blue",
+        typstTheme: "executive-blue",
+      });
+
+      const stats = spawnSync("sh", ["-lc", `test -s "${outputPath}"`], {
+        stdio: "ignore",
+      });
+      expect(stats.status).toBe(0);
+    },
+  );
+
+  it.skipIf(!typstAvailable())(
     "renders US Letter pages in every theme when requested",
     async () => {
       const tempDir = await createTempDir();

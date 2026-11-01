@@ -4,6 +4,7 @@ export const TYPST_THEME_VALUES = [
   "classic",
   "clean-print-cv",
   "compact",
+  "executive-blue",
 ] as const;
 
 export type GeneratedTypstTheme = (typeof TYPST_THEME_VALUES)[number];
@@ -12,6 +13,7 @@ export const TYPST_THEME_LABELS: Record<GeneratedTypstTheme, string> = {
   classic: "Classic",
   "clean-print-cv": "Clean Print CV",
   compact: "Compact",
+  "executive-blue": "Executive Blue",
 };
 
 export const TYPST_THEME_DESCRIPTIONS: Record<GeneratedTypstTheme, string> = {
@@ -19,6 +21,8 @@ export const TYPST_THEME_DESCRIPTIONS: Record<GeneratedTypstTheme, string> = {
   "clean-print-cv":
     "A print-friendly adapted theme powered by @preview/clean-print-cv.",
   compact: "A denser Jake-style resume layout for fitting more content.",
+  "executive-blue":
+    "A designed multi-page CV: gradient header band, sidebar, boxed current role and experience timeline.",
 };
 
 export const TYPST_THEME_KINDS: Record<
@@ -28,6 +32,7 @@ export const TYPST_THEME_KINDS: Record<
   classic: "native",
   "clean-print-cv": "adapted",
   compact: "native",
+  "executive-blue": "adapted",
 };
 
 export const TYPST_THEME_OPTIONS = TYPST_THEME_VALUES.map((value) => ({
