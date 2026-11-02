@@ -4,6 +4,10 @@ import {
   getPostApplicationIntegration,
   upsertConnectedPostApplicationIntegration,
 } from "@server/repositories/post-application-integrations";
+import {
+  decodeStoredGmailCredentials,
+  encodeStoredGmailCredentials,
+} from "@server/services/post-application/ingestion/gmail-credentials";
 import { runGmailIngestionSync } from "@server/services/post-application/ingestion/gmail-sync";
 import type { PostApplicationIntegration } from "@shared/types";
 import { providerInvalidRequest, providerUpstreamError } from "./errors";
@@ -66,6 +70,16 @@ function parseGmailCredentials(
   };
 }
 
+function hasStoredToken(
+  credentials: Record<string, unknown>,
+  encryptedKey: string,
+  legacyKey: string,
+): boolean {
+  return [credentials[encryptedKey], credentials[legacyKey]].some(
+    (value) => typeof value === "string" && value.length > 0,
+  );
+}
+
 function toPublicIntegration(
   integration: PostApplicationIntegration | null,
 ): PostApplicationIntegration | null {
@@ -75,12 +89,16 @@ function toPublicIntegration(
   return {
     ...integration,
     credentials: {
-      hasRefreshToken:
-        typeof credentials.refreshToken === "string" &&
-        credentials.refreshToken.length > 0,
-      hasAccessToken:
-        typeof credentials.accessToken === "string" &&
-        credentials.accessToken.length > 0,
+      hasRefreshToken: hasStoredToken(
+        credentials,
+        "refreshTokenEncrypted",
+        "refreshToken",
+      ),
+      hasAccessToken: hasStoredToken(
+        credentials,
+        "accessTokenEncrypted",
+        "accessToken",
+      ),
       scope: asString(credentials.scope) ?? null,
       tokenType: asString(credentials.tokenType) ?? null,
       expiryDate: asNumber(credentials.expiryDate) ?? null,
@@ -153,18 +171,7 @@ export const gmailProvider: PostApplicationProviderAdapter = {
       provider: "gmail",
       accountKey: args.accountKey,
       displayName,
-      credentials: {
-        refreshToken: credentials.refreshToken,
-        ...(credentials.accessToken
-          ? { accessToken: credentials.accessToken }
-          : {}),
-        ...(typeof credentials.expiryDate === "number"
-          ? { expiryDate: credentials.expiryDate }
-          : {}),
-        ...(credentials.scope ? { scope: credentials.scope } : {}),
-        ...(credentials.tokenType ? { tokenType: credentials.tokenType } : {}),
-        ...(credentials.email ? { email: credentials.email } : {}),
-      },
+      credentials: await encodeStoredGmailCredentials(credentials),
     });
 
     logger.info("Gmail integration connected", {
@@ -247,12 +254,21 @@ export const gmailProvider: PostApplicationProviderAdapter = {
       "gmail",
       args.accountKey,
     );
-    const refreshToken =
-      integration?.credentials &&
-      typeof integration.credentials.refreshToken === "string" &&
-      integration.credentials.refreshToken.length > 0
-        ? integration.credentials.refreshToken
-        : null;
+    const storedCredentials = integration?.credentials ?? null;
+    const decodedCredentials =
+      await decodeStoredGmailCredentials(storedCredentials);
+    const refreshToken = decodedCredentials?.refreshToken ?? null;
+    if (
+      !refreshToken &&
+      storedCredentials &&
+      hasStoredToken(storedCredentials, "refreshTokenEncrypted", "refreshToken")
+    ) {
+      logger.warn("Gmail refresh token could not be decoded; skipping revoke", {
+        provider: "gmail",
+        accountKey: args.accountKey,
+        initiatedBy: args.initiatedBy ?? null,
+      });
+    }
 
     let revokeWarning: string | null = null;
     if (refreshToken) {

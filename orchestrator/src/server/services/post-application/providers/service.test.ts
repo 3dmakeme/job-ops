@@ -63,12 +63,37 @@ import {
 } from "./registry";
 import { executePostApplicationProviderAction } from "./service";
 
+const { encryptSecret } = await import("@infra/credential-crypto");
+
+function gmailIntegration(
+  credentials: Record<string, unknown>,
+): PostApplicationIntegration {
+  return {
+    id: "integration-test",
+    provider: "gmail",
+    accountKey: "account:gmail:test",
+    displayName: "Gmail (default)",
+    status: "connected",
+    credentials,
+    lastConnectedAt: Date.now(),
+    lastSyncedAt: null,
+    lastError: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv(
+    "CREDENTIALS_ENCRYPTION_KEY",
+    "test-credentials-encryption-key-0123456789",
+  );
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200 }));
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -124,8 +149,20 @@ describe("post-application provider action dispatcher", () => {
         accountKey: "account:gmail:test",
       }),
     );
+    const [{ credentials: storedCredentials }] = vi.mocked(
+      integrationRepo.upsertConnectedPostApplicationIntegration,
+    ).mock.calls[0];
+    expect(String(storedCredentials.refreshTokenEncrypted)).toMatch(/^v1:/);
+    expect(String(storedCredentials.accessTokenEncrypted)).toMatch(/^v1:/);
+    expect(storedCredentials).not.toHaveProperty("refreshToken");
+    expect(storedCredentials).not.toHaveProperty("accessToken");
+    expect(Object.values(storedCredentials)).not.toContain("refresh-token");
+    expect(Object.values(storedCredentials)).not.toContain("access-token");
     expect(response.status.connected).toBe(true);
     expect(response.message).toBe("Gmail integration connected.");
+    expect(JSON.stringify(response)).not.toContain(
+      String(storedCredentials.refreshTokenEncrypted),
+    );
     expect(response.status.integration?.credentials).toEqual(
       expect.objectContaining({
         hasRefreshToken: true,
@@ -156,24 +193,65 @@ describe("post-application provider action dispatcher", () => {
     });
   });
 
+  it("reports a legacy plaintext gmail row as connected", async () => {
+    const getIntegrationMock =
+      integrationRepo.getPostApplicationIntegration as Mock;
+    getIntegrationMock.mockResolvedValueOnce(
+      gmailIntegration({ refreshToken: "refresh-token" }),
+    );
+
+    const response = await executePostApplicationProviderAction({
+      provider: "gmail",
+      action: "status",
+      accountKey: "account:gmail:test",
+    });
+
+    expect(response.status.connected).toBe(true);
+    expect(response.status.integration?.credentials).toEqual(
+      expect.objectContaining({
+        hasRefreshToken: true,
+        hasAccessToken: false,
+      }),
+    );
+    expect(JSON.stringify(response)).not.toContain("refresh-token");
+  });
+
+  it("reports an encrypted gmail row as connected without exposing tokens", async () => {
+    const refreshTokenEncrypted = await encryptSecret("refresh-token");
+    const accessTokenEncrypted = await encryptSecret("access-token");
+    const getIntegrationMock =
+      integrationRepo.getPostApplicationIntegration as Mock;
+    getIntegrationMock.mockResolvedValueOnce(
+      gmailIntegration({ refreshTokenEncrypted, accessTokenEncrypted }),
+    );
+
+    const response = await executePostApplicationProviderAction({
+      provider: "gmail",
+      action: "status",
+      accountKey: "account:gmail:test",
+    });
+
+    expect(response.status.connected).toBe(true);
+    expect(response.status.integration?.credentials).toEqual(
+      expect.objectContaining({
+        hasRefreshToken: true,
+        hasAccessToken: true,
+      }),
+    );
+    const serialized = JSON.stringify(response);
+    expect(serialized).not.toContain(refreshTokenEncrypted);
+    expect(serialized).not.toContain(accessTokenEncrypted);
+    expect(serialized).not.toContain("refresh-token");
+  });
+
   it("disconnects gmail and clears credentials from integration store", async () => {
     const getIntegrationMock =
       integrationRepo.getPostApplicationIntegration as Mock;
-    getIntegrationMock.mockResolvedValueOnce({
-      id: "integration-test",
-      provider: "gmail",
-      accountKey: "account:gmail:test",
-      displayName: "Gmail (default)",
-      status: "connected",
-      credentials: {
-        refreshToken: "refresh-token",
-      },
-      lastConnectedAt: Date.now(),
-      lastSyncedAt: null,
-      lastError: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    } satisfies PostApplicationIntegration);
+    getIntegrationMock.mockResolvedValueOnce(
+      gmailIntegration({
+        refreshTokenEncrypted: await encryptSecret("refresh-token"),
+      }),
+    );
 
     const response = await executePostApplicationProviderAction({
       provider: "gmail",
@@ -182,6 +260,8 @@ describe("post-application provider action dispatcher", () => {
     });
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [, revokeInit] = vi.mocked(global.fetch).mock.calls[0];
+    expect(String(revokeInit?.body)).toBe("token=refresh-token");
     expect(
       integrationRepo.disconnectPostApplicationIntegration,
     ).toHaveBeenCalledWith("gmail", "account:gmail:test");
@@ -193,6 +273,26 @@ describe("post-application provider action dispatcher", () => {
         hasAccessToken: false,
       }),
     );
+  });
+
+  it("disconnects locally without revoking when the refresh token cannot be decrypted", async () => {
+    const getIntegrationMock =
+      integrationRepo.getPostApplicationIntegration as Mock;
+    getIntegrationMock.mockResolvedValueOnce(
+      gmailIntegration({ refreshTokenEncrypted: "v1:not:valid:ciphertext" }),
+    );
+
+    const response = await executePostApplicationProviderAction({
+      provider: "gmail",
+      action: "disconnect",
+      accountKey: "account:gmail:test",
+    });
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(
+      integrationRepo.disconnectPostApplicationIntegration,
+    ).toHaveBeenCalledWith("gmail", "account:gmail:test");
+    expect(response.status.connected).toBe(false);
   });
 
   it("returns invalid request when gmail connect payload is missing refresh token", async () => {

@@ -18,22 +18,25 @@ vi.mock("@server/infra/product-analytics", () => ({
 }));
 
 vi.mock("@server/repositories/post-application-integrations", () => ({
-  getPostApplicationIntegration: vi.fn().mockResolvedValue({
-    id: "integration-1",
-    provider: "gmail",
-    accountKey: "default",
-    displayName: "Gmail",
-    status: "connected",
-    credentials: {
-      refreshToken: "refresh-token",
-      accessToken: "access-token",
-      expiryDate: Date.now() + 60 * 60 * 1000,
-    },
-    lastConnectedAt: null,
-    lastSyncedAt: null,
-    lastError: null,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+  getPostApplicationIntegration: vi.fn(async () => {
+    const { encryptSecret } = await import("@infra/credential-crypto");
+    return {
+      id: "integration-1",
+      provider: "gmail",
+      accountKey: "default",
+      displayName: "Gmail",
+      status: "connected",
+      credentials: {
+        refreshTokenEncrypted: await encryptSecret("refresh-token"),
+        accessTokenEncrypted: await encryptSecret("access-token"),
+        expiryDate: Date.now() + 60 * 60 * 1000,
+      },
+      lastConnectedAt: null,
+      lastSyncedAt: null,
+      lastError: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
   }),
   updatePostApplicationIntegrationSyncState: vi.fn().mockResolvedValue(null),
   upsertConnectedPostApplicationIntegration: vi.fn().mockResolvedValue(null),
@@ -240,5 +243,9 @@ describe("gmail sync auto-log idempotency", () => {
 
     expect(mocks.upsertPostApplicationMessage).toHaveBeenCalledTimes(2);
     expect(mocks.transitionStage).toHaveBeenCalledTimes(1);
+    const { upsertConnectedPostApplicationIntegration } = await import(
+      "@server/repositories/post-application-integrations"
+    );
+    expect(upsertConnectedPostApplicationIntegration).not.toHaveBeenCalled();
   });
 });

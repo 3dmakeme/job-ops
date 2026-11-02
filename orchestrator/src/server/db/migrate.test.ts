@@ -1,8 +1,10 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { readdirSync, statSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, it } from "vitest";
+import Database from "better-sqlite3";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe.sequential("database migrations", () => {
   let tempDir: string | null = null;
@@ -568,5 +570,330 @@ describe.sequential("database migrations", () => {
         stdio: "pipe",
       },
     );
+  });
+});
+
+describe.sequential("gmail token encryption migration", () => {
+  const REFRESH_A = "1//refresh-token-tenant-a-plain";
+  const ACCESS_A = "ya29.access-token-tenant-a-plain";
+  const REFRESH_B = "1//refresh-token-tenant-b-plain";
+  const ACCESS_B = "ya29.access-token-tenant-b-plain";
+  const SEEDED_TOKENS = [REFRESH_A, ACCESS_A, REFRESH_B, ACCESS_B];
+  const IMAP_CREDENTIALS = {
+    host: "mail.example.com",
+    passwordEncrypted: "v1:imap:already:encrypted",
+  };
+
+  let tempDir: string | null = null;
+
+  afterEach(async () => {
+    if (tempDir) {
+      await rm(tempDir, { recursive: true, force: true });
+      tempDir = null;
+    }
+  });
+
+  function childEnv(dataDir: string): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { ...process.env, DATA_DIR: dataDir };
+    delete env.CREDENTIALS_ENCRYPTION_KEY;
+    return env;
+  }
+
+  function runNode(
+    dataDir: string,
+    args: string[],
+  ): { status: number | null; output: string } {
+    const result = spawnSync(process.execPath, ["--import", "tsx", ...args], {
+      env: childEnv(dataDir),
+      encoding: "utf8",
+    });
+    return {
+      status: result.status,
+      output: `${result.stdout ?? ""}${result.stderr ?? ""}`,
+    };
+  }
+
+  function runMigrate(dataDir: string) {
+    return runNode(dataDir, ["src/server/db/migrate.ts"]);
+  }
+
+  function runRollback(dataDir: string) {
+    return runNode(dataDir, [
+      "src/server/db/rollback-gmail-token-encryption.ts",
+    ]);
+  }
+
+  function expectNoTokens(output: string): void {
+    for (const token of SEEDED_TOKENS) {
+      expect(output).not.toContain(token);
+    }
+  }
+
+  function filesWithPrefix(dataDir: string, prefix: string): string[] {
+    return readdirSync(dataDir).filter(
+      (name) => name.startsWith(prefix) && name.endsWith(".db"),
+    );
+  }
+
+  async function seedLegacyDb(): Promise<string> {
+    const dataDir = await mkdtemp(join(tmpdir(), "job-ops-gmail-tokens-"));
+    expect(runMigrate(dataDir).status).toBe(0);
+
+    const sqlite = new Database(join(dataDir, "jobs.db"));
+    sqlite.exec(`
+      INSERT INTO tenants(id, name, slug) VALUES ('tenant_b', 'B', 'b');
+      INSERT INTO users(id, username) VALUES ('user_a', 'a'), ('user_b', 'b');
+    `);
+    const insertIntegration = sqlite.prepare(
+      "INSERT INTO post_application_integrations(id, tenant_id, user_id, provider, account_key, status, credentials) VALUES (?, ?, ?, ?, 'default', 'connected', ?)",
+    );
+    insertIntegration.run(
+      "gmail-a",
+      "tenant_default",
+      "user_a",
+      "gmail",
+      JSON.stringify({
+        refreshToken: REFRESH_A,
+        accessToken: ACCESS_A,
+        expiryDate: 1_900_000_000_000,
+        scope: "https://www.googleapis.com/auth/gmail.readonly",
+        email: "a@example.com",
+      }),
+    );
+    insertIntegration.run(
+      "gmail-b",
+      "tenant_b",
+      "user_b",
+      "gmail",
+      JSON.stringify({ refreshToken: REFRESH_B, accessToken: ACCESS_B }),
+    );
+    insertIntegration.run(
+      "imap-a",
+      "tenant_default",
+      "user_a",
+      "imap",
+      JSON.stringify(IMAP_CREDENTIALS),
+    );
+    const insertJob = sqlite.prepare(
+      "INSERT INTO jobs(id, tenant_id, user_id, title, employer, job_url) VALUES (?, ?, ?, 'Role', 'Acme', ?)",
+    );
+    insertJob.run("job-a", "tenant_default", "user_a", "https://example.com/a");
+    insertJob.run("job-b", "tenant_b", "user_b", "https://example.com/b");
+    sqlite.close();
+    return dataDir;
+  }
+
+  function readCredentials(
+    dbPath: string,
+    id: string,
+  ): Record<string, unknown> {
+    const sqlite = new Database(dbPath, { readonly: true });
+    const row = sqlite
+      .prepare(
+        "SELECT credentials FROM post_application_integrations WHERE id = ?",
+      )
+      .get(id) as { credentials: string };
+    sqlite.close();
+    return JSON.parse(row.credentials) as Record<string, unknown>;
+  }
+
+  function countJobs(dbPath: string): number {
+    const sqlite = new Database(dbPath, { readonly: true });
+    const row = sqlite.prepare("SELECT count(*) AS count FROM jobs").get() as {
+      count: number;
+    };
+    sqlite.close();
+    return row.count;
+  }
+
+  async function decryptWithDataDir(
+    dataDir: string,
+    values: unknown[],
+  ): Promise<string[]> {
+    const originalEnv = { ...process.env };
+    process.env = { ...originalEnv, DATA_DIR: dataDir };
+    delete process.env.CREDENTIALS_ENCRYPTION_KEY;
+    vi.resetModules();
+    try {
+      const { decryptSecret } = await import("@infra/credential-crypto");
+      return await Promise.all(
+        values.map((value) => decryptSecret(String(value))),
+      );
+    } finally {
+      process.env = originalEnv;
+      vi.resetModules();
+    }
+  }
+
+  it("encrypts plaintext rows across tenants after a verified backup", async () => {
+    tempDir = await seedLegacyDb();
+    const dbPath = join(tempDir, "jobs.db");
+    const jobsBefore = countJobs(dbPath);
+
+    const result = runMigrate(tempDir);
+
+    expect(result.status).toBe(0);
+    expectNoTokens(result.output);
+
+    const rowA = readCredentials(dbPath, "gmail-a");
+    expect(String(rowA.refreshTokenEncrypted)).toMatch(/^v1:/);
+    expect(String(rowA.accessTokenEncrypted)).toMatch(/^v1:/);
+    expect(rowA).not.toHaveProperty("refreshToken");
+    expect(rowA).not.toHaveProperty("accessToken");
+    expect(rowA).toMatchObject({
+      expiryDate: 1_900_000_000_000,
+      scope: "https://www.googleapis.com/auth/gmail.readonly",
+      email: "a@example.com",
+    });
+
+    const rowB = readCredentials(dbPath, "gmail-b");
+    expect(String(rowB.refreshTokenEncrypted)).toMatch(/^v1:/);
+    expect(String(rowB.accessTokenEncrypted)).toMatch(/^v1:/);
+    expect(rowB).not.toHaveProperty("refreshToken");
+    expect(rowB).not.toHaveProperty("accessToken");
+
+    expect(readCredentials(dbPath, "imap-a")).toEqual(IMAP_CREDENTIALS);
+    expect(countJobs(dbPath)).toBe(jobsBefore);
+
+    await expect(
+      decryptWithDataDir(tempDir, [
+        rowA.refreshTokenEncrypted,
+        rowA.accessTokenEncrypted,
+        rowB.refreshTokenEncrypted,
+        rowB.accessTokenEncrypted,
+      ]),
+    ).resolves.toEqual([REFRESH_A, ACCESS_A, REFRESH_B, ACCESS_B]);
+
+    const backups = filesWithPrefix(
+      tempDir,
+      "jobs_pre_gmail_token_encryption_",
+    );
+    expect(backups).toHaveLength(1);
+    expect(backups[0]).toMatch(
+      /^jobs_pre_gmail_token_encryption_\d{8}T\d{6}Z\.db$/,
+    );
+    const backupPath = join(tempDir, backups[0]);
+    expect(statSync(backupPath).mode & 0o777).toBe(0o600);
+
+    const backup = new Database(backupPath, { readonly: true });
+    expect(backup.pragma("integrity_check", { simple: true })).toBe("ok");
+    const backupRow = backup
+      .prepare(
+        "SELECT credentials FROM post_application_integrations WHERE id = 'gmail-a'",
+      )
+      .get() as { credentials: string };
+    backup.close();
+    expect(JSON.parse(backupRow.credentials)).toMatchObject({
+      refreshToken: REFRESH_A,
+      accessToken: ACCESS_A,
+    });
+  });
+
+  it("is a no-op on repeated runs and on databases without gmail rows", async () => {
+    tempDir = await seedLegacyDb();
+    const dbPath = join(tempDir, "jobs.db");
+    expect(runMigrate(tempDir).status).toBe(0);
+    const firstRun = readCredentials(dbPath, "gmail-a");
+
+    const second = runMigrate(tempDir);
+
+    expect(second.status).toBe(0);
+    expect(readCredentials(dbPath, "gmail-a")).toEqual(firstRun);
+    expect(
+      filesWithPrefix(tempDir, "jobs_pre_gmail_token_encryption_"),
+    ).toHaveLength(1);
+
+    const freshDir = await mkdtemp(join(tmpdir(), "job-ops-gmail-tokens-"));
+    try {
+      expect(runMigrate(freshDir).status).toBe(0);
+      expect(filesWithPrefix(freshDir, "jobs_pre_gmail_token_")).toEqual([]);
+    } finally {
+      await rm(freshDir, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves rows untouched and still boots when the backup fails", async () => {
+    tempDir = await seedLegacyDb();
+    const dbPath = join(tempDir, "jobs.db");
+    const before = readCredentials(dbPath, "gmail-a");
+    const script = `
+      import { join } from "node:path";
+      import { pathToFileURL } from "node:url";
+      import Database from "better-sqlite3";
+
+      Database.prototype.backup = async () => {
+        throw new Error("simulated backup failure");
+      };
+      await import(pathToFileURL(join(process.cwd(), "src/server/db/migrate.ts")).href);
+    `;
+
+    const result = runNode(tempDir, ["--input-type=module", "-e", script]);
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain("pre-migration backup failed");
+    expectNoTokens(result.output);
+    expect(readCredentials(dbPath, "gmail-a")).toEqual(before);
+    expect(readCredentials(dbPath, "gmail-b")).toEqual({
+      refreshToken: REFRESH_B,
+      accessToken: ACCESS_B,
+    });
+    expect(filesWithPrefix(tempDir, "jobs_pre_gmail_token_")).toEqual([]);
+  });
+
+  it("rolls encrypted rows back to plaintext after a verified backup", async () => {
+    tempDir = await seedLegacyDb();
+    const dbPath = join(tempDir, "jobs.db");
+    expect(runMigrate(tempDir).status).toBe(0);
+
+    const rollback = runRollback(tempDir);
+
+    expect(rollback.status).toBe(0);
+    expectNoTokens(rollback.output);
+    const rowA = readCredentials(dbPath, "gmail-a");
+    expect(rowA).toEqual({
+      refreshToken: REFRESH_A,
+      accessToken: ACCESS_A,
+      expiryDate: 1_900_000_000_000,
+      scope: "https://www.googleapis.com/auth/gmail.readonly",
+      email: "a@example.com",
+    });
+    expect(readCredentials(dbPath, "gmail-b")).toEqual({
+      refreshToken: REFRESH_B,
+      accessToken: ACCESS_B,
+    });
+    expect(readCredentials(dbPath, "imap-a")).toEqual(IMAP_CREDENTIALS);
+    const rollbackBackups = filesWithPrefix(
+      tempDir,
+      "jobs_pre_gmail_token_rollback_",
+    );
+    expect(rollbackBackups).toHaveLength(1);
+    expect(statSync(join(tempDir, rollbackBackups[0])).mode & 0o777).toBe(
+      0o600,
+    );
+
+    const again = runRollback(tempDir);
+
+    expect(again.status).toBe(0);
+    expect(readCredentials(dbPath, "gmail-a")).toEqual(rowA);
+    expect(
+      filesWithPrefix(tempDir, "jobs_pre_gmail_token_rollback_"),
+    ).toHaveLength(1);
+  });
+
+  it("exits non-zero and writes nothing when rollback cannot decrypt", async () => {
+    tempDir = await seedLegacyDb();
+    const dbPath = join(tempDir, "jobs.db");
+    expect(runMigrate(tempDir).status).toBe(0);
+    const encrypted = readCredentials(dbPath, "gmail-a");
+    writeFileSync(
+      join(tempDir, "credentials-key"),
+      "a-different-credentials-key-that-cannot-decrypt\n",
+    );
+
+    const rollback = runRollback(tempDir);
+
+    expect(rollback.status).not.toBe(0);
+    expect(rollback.output).toContain("Gmail token rollback failed");
+    expect(readCredentials(dbPath, "gmail-a")).toEqual(encrypted);
   });
 });

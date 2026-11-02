@@ -1,0 +1,41 @@
+{
+  "id": "006-gmail-token-encryption",
+  "title": "Encrypt Gmail tokens",
+  "feature": "Encrypt existing Gmail access and refresh tokens at rest using credential-crypto.ts, with a safe one-off migration of existing rows (idempotent, backs up first, still reads legacy plaintext values)",
+  "branch": "factory/006-gmail-token-encryption",
+  "base": "main",
+  "worktree": "/Users/richards/Code/job-ops-factory/006-gmail-token-encryption",
+  "reviewers": [
+    {
+      "name": "security",
+      "agent": "fm-factory:reviewer-security",
+      "skills": [
+        "fm-factory:secure-endpoint"
+      ]
+    },
+    {
+      "name": "ux",
+      "agent": "fm-factory:reviewer-ux",
+      "browser": true
+    },
+    {
+      "name": "ui",
+      "agent": "fm-factory:reviewer-ui",
+      "browser": true
+    },
+    {
+      "name": "code",
+      "agent": "fm-factory:reviewer-code"
+    }
+  ],
+  "models": {},
+  "stage": "merged",
+  "round": 1,
+  "reviews": {
+    "security": "PASS",
+    "ux": "PASS",
+    "ui": "PASS",
+    "code": "PASS"
+  },
+  "merged": "2026-11-02"
+}

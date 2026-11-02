@@ -5,8 +5,10 @@
 import { randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { logger } from "@infra/logger";
 import Database from "better-sqlite3";
 import { getDataDir } from "../config/dataDir";
+import { encryptLegacyGmailTokens } from "./gmail-token-encryption";
 
 // Database path - can be overridden via env for Docker
 const DB_PATH = join(getDataDir(), "jobs.db");
@@ -1885,6 +1887,14 @@ sqlite.exec(
 sqlite.exec(
   "CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_id ON auth_sessions(user_id)",
 );
+
+// Plaintext Gmail tokens still work through the legacy read path, so a failure
+// here must not stop the app from booting.
+try {
+  await encryptLegacyGmailTokens(sqlite, { dbPath: DB_PATH });
+} catch (error) {
+  logger.error("Gmail token encryption failed; continuing startup", error);
+}
 
 sqlite.close();
 console.log("🎉 Database migrations complete!");
