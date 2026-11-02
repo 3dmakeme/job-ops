@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { badRequest, serviceUnavailable, upstreamError } from "@infra/errors";
 import { asyncRoute, fail, ok } from "@infra/http";
 import { logger } from "@infra/logger";
+import { isDemoMode, sendDemoBlocked } from "@server/config/demo";
 import { executePostApplicationProviderAction } from "@server/services/post-application/providers";
 import { getPrivateDataScope } from "@server/tenancy/private-scope";
 import {
@@ -356,6 +357,20 @@ postApplicationProvidersRouter.post(
         return;
       }
       throw error;
+    }
+
+    if (
+      isDemoMode() &&
+      provider === "imap" &&
+      (action === "connect" || action === "sync")
+    ) {
+      return sendDemoBlocked(
+        res,
+        "Connecting and syncing IMAP mailboxes is disabled in the public demo.",
+        {
+          route: `POST /api/post-application/providers/imap/actions/${action}`,
+        },
+      );
     }
 
     let accountKey: string;

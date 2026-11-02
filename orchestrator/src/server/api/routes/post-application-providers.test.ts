@@ -136,6 +136,46 @@ describe.sequential("Post-Application Provider actions API", () => {
     });
   });
 
+  it.each([
+    "connect",
+    "sync",
+  ])("blocks imap %s in demo mode without reaching the provider", async (action) => {
+    await stopServer({ server, closeDb, tempDir });
+    ({ server, baseUrl, closeDb, tempDir } = await startServer({
+      env: {
+        DEMO_MODE: "true",
+        JOBOPS_TEST_AUTH_BYPASS: "0",
+        BASIC_AUTH_USER: "",
+        BASIC_AUTH_PASSWORD: "",
+      },
+    }));
+    const { executePostApplicationProviderAction } = await import(
+      "@server/services/post-application/providers"
+    );
+
+    const res = await fetch(
+      `${baseUrl}/api/post-application/providers/imap/actions/${action}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payload: {
+            host: "10.0.0.1",
+            username: "probe",
+            password: "probe-password",
+          },
+        }),
+      },
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body.ok).toBe(false);
+    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.meta?.blockedReason).toContain("disabled in the public demo");
+    expect(executePostApplicationProviderAction).not.toHaveBeenCalled();
+  });
+
   it("returns 400 INVALID_REQUEST for unsupported actions", async () => {
     const res = await fetch(
       `${baseUrl}/api/post-application/providers/gmail/actions/invalid`,
