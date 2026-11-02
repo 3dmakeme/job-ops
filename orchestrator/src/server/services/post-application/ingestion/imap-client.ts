@@ -29,6 +29,7 @@ export interface ImapClient {
   connect(): Promise<void>;
   openInboxReadOnly(): Promise<{ uidValidity: string }>;
   searchUidsSince(since: Date): Promise<number[]>;
+  searchUidsAfter(lastUid: number): Promise<number[]>;
   fetchMessageSizes(uids: number[]): Promise<ImapMessageSize[]>;
   fetchMessageSources(
     uids: number[],
@@ -121,6 +122,19 @@ export function createImapClient(config: ImapConnectionConfig): ImapClient {
       try {
         const uids = await client.search({ since }, { uid: true });
         return uids || [];
+      } catch (error) {
+        throw toImapError(error, "IMAP server search failed.");
+      }
+    },
+
+    async searchUidsAfter(lastUid: number) {
+      try {
+        const uids = await client.search(
+          { uid: `${lastUid + 1}:*` },
+          { uid: true },
+        );
+        // `*` resolves to the highest existing UID, which can be <= lastUid.
+        return (uids || []).filter((uid) => uid > lastUid);
       } catch (error) {
         throw toImapError(error, "IMAP server search failed.");
       }

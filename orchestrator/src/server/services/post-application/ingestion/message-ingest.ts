@@ -36,6 +36,11 @@ export type IngestItem = {
   load: () => Promise<IngestMessage>;
 };
 
+/** Per-item outcome handed to `onItemsProcessed` once every item has run. */
+export type IngestionItemsOutcome = {
+  erroredExternalMessageIds: ReadonlySet<string>;
+};
+
 export type IngestionSyncSummary = {
   discovered: number;
   relevant: number;
@@ -141,8 +146,9 @@ async function runWithConcurrency<T>(
 /**
  * Starts a sync run, lists messages through `listItems`, routes each one
  * through the smart router and persists it, then records the run outcome on
- * the run and the integration. Errors from `listItems` fail the whole run and
- * are rethrown; errors from a single item only increment `errored`.
+ * the run and the integration. Errors from `listItems` or `onItemsProcessed`
+ * fail the whole run and are rethrown; errors from a single item only
+ * increment `errored`.
  */
 export async function runPostApplicationIngestion(args: {
   provider: PostApplicationProvider;
@@ -150,6 +156,7 @@ export async function runPostApplicationIngestion(args: {
   integrationId: string;
   failureErrorCode: string;
   listItems: () => Promise<IngestItem[]>;
+  onItemsProcessed?: (outcome: IngestionItemsOutcome) => Promise<void>;
 }): Promise<IngestionSyncSummary> {
   const { provider, accountKey, integrationId } = args;
   const syncRun = await startPostApplicationSyncRun({
@@ -163,6 +170,7 @@ export async function runPostApplicationIngestion(args: {
   let classified = 0;
   let matched = 0;
   let errored = 0;
+  const erroredExternalMessageIds = new Set<string>();
 
   try {
     const items = await args.listItems();
@@ -323,6 +331,7 @@ export async function runPostApplicationIngestion(args: {
         }
       } catch (error) {
         errored += 1;
+        erroredExternalMessageIds.add(item.externalMessageId);
         logger.warn("Failed to ingest post-application message", {
           provider,
           accountKey,
@@ -332,6 +341,8 @@ export async function runPostApplicationIngestion(args: {
         });
       }
     });
+
+    await args.onItemsProcessed?.({ erroredExternalMessageIds });
 
     await completePostApplicationSyncRun({
       id: syncRun.id,

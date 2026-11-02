@@ -1,6 +1,10 @@
+import { isDeepStrictEqual } from "node:util";
 import { decryptSecret } from "@infra/credential-crypto";
 import { logger } from "@infra/logger";
-import { getPostApplicationIntegration } from "@server/repositories/post-application-integrations";
+import {
+  getPostApplicationIntegration,
+  replacePostApplicationIntegrationCredentialsIfUnchanged,
+} from "@server/repositories/post-application-integrations";
 import { normalizeWhitespace } from "@shared/utils/string";
 import { type ParsedMail, simpleParser } from "mailparser";
 import { cleanEmailHtmlForLlm } from "./gmail-api";
@@ -14,6 +18,7 @@ import {
 } from "./imap-client";
 import {
   type IngestItem,
+  type IngestionItemsOutcome,
   type IngestionSyncSummary,
   type IngestMessage,
   runPostApplicationIngestion,
@@ -31,6 +36,26 @@ export type StoredImapCredentials = {
   tls: boolean;
   username: string;
   passwordEncrypted: string;
+};
+
+/** Highest INBOX UID ingested without gaps, valid only for `uidValidity`. */
+export type ImapSyncWatermark = {
+  uidValidity: string;
+  lastUid: number;
+};
+
+type ImapSyncMode = "first" | "incremental" | "reset";
+
+/** `skipped`: the account was disconnected or reconnected during the sync. */
+type ImapWatermarkWrite = "stored" | "unchanged" | "skipped";
+
+type InboxFetchResult = {
+  uidValidity: string;
+  mode: ImapSyncMode;
+  /** UIDs left after the `maxMessages` cap, before the byte budget. */
+  candidates: number[];
+  selected: number[];
+  messages: ImapFetchedMessage[];
 };
 
 /** The integration is missing or its stored password is unusable. */
@@ -66,6 +91,24 @@ export function parseStoredImapCredentials(
     return null;
   }
   return { host, port, tls: credentials.tls, username, passwordEncrypted };
+}
+
+/** Reads `credentials.syncWatermark`; anything malformed counts as absent. */
+export function parseImapSyncWatermark(
+  credentials: Record<string, unknown> | null,
+): ImapSyncWatermark | null {
+  const value = credentials?.syncWatermark;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { uidValidity, lastUid } = value as Record<string, unknown>;
+  if (
+    typeof uidValidity !== "string" ||
+    typeof lastUid !== "number" ||
+    !Number.isInteger(lastUid) ||
+    lastUid < 0
+  ) {
+    return null;
+  }
+  return { uidValidity, lastUid };
 }
 
 function stripAngleBrackets(value: string): string {
@@ -133,12 +176,12 @@ export function mapParsedImapMessage(
 }
 
 /**
- * Greedy newest-first fit of UIDs into the per-sync byte budget. Each UID is
+ * Greedy in-order fit of UIDs into the per-sync byte budget. Each UID is
  * charged its reported size capped at the per-message limit (the cap when the
- * size is unknown); UIDs that do not fit are skipped so older, smaller ones can.
+ * size is unknown); UIDs that do not fit are skipped so later, smaller ones can.
  */
 function selectUidsWithinBudget(
-  newestUids: number[],
+  orderedUids: number[],
   sizes: ImapMessageSize[],
 ): { selected: number[]; skipped: number[]; truncated: ImapMessageSize[] } {
   const sizeByUid = new Map(sizes.map((entry) => [entry.uid, entry.size]));
@@ -146,7 +189,7 @@ function selectUidsWithinBudget(
   const skipped: number[] = [];
   const truncated: ImapMessageSize[] = [];
   let remaining = IMAP_MAX_SYNC_BYTES;
-  for (const uid of newestUids) {
+  for (const uid of orderedUids) {
     const size = sizeByUid.get(uid) ?? null;
     const charge =
       size === null
@@ -165,22 +208,45 @@ function selectUidsWithinBudget(
   return { selected, skipped, truncated };
 }
 
-async function fetchRecentInboxMessages(
+/**
+ * Without a usable watermark, reads the newest `maxMessages` UIDs of the
+ * `searchDays` window; with one, reads the oldest `maxMessages` UIDs above it,
+ * so a backlog drains over several syncs.
+ */
+async function fetchInboxMessages(
   accountKey: string,
   config: ImapConnectionConfig,
+  watermark: ImapSyncWatermark | null,
   searchDays: number,
   maxMessages: number,
-): Promise<{ uidValidity: string; messages: ImapFetchedMessage[] }> {
+): Promise<InboxFetchResult> {
   const client = createImapClient(config);
   try {
     await client.connect();
     const { uidValidity } = await client.openInboxReadOnly();
-    const since = new Date(Date.now() - searchDays * 24 * 60 * 60 * 1000);
-    const uids = await client.searchUidsSince(since);
-    const newestUids = [...uids].sort((a, b) => b - a).slice(0, maxMessages);
-    const sizes = await client.fetchMessageSizes(newestUids);
+    let mode: ImapSyncMode;
+    let candidates: number[];
+    if (watermark && watermark.uidValidity === uidValidity) {
+      mode = "incremental";
+      const uids = await client.searchUidsAfter(watermark.lastUid);
+      candidates = [...uids].sort((a, b) => a - b).slice(0, maxMessages);
+    } else {
+      mode = watermark ? "reset" : "first";
+      if (watermark) {
+        logger.warn("IMAP UIDVALIDITY changed; discarding sync watermark", {
+          provider: "imap",
+          accountKey,
+          previousUidValidity: watermark.uidValidity,
+          uidValidity,
+        });
+      }
+      const since = new Date(Date.now() - searchDays * 24 * 60 * 60 * 1000);
+      const uids = await client.searchUidsSince(since);
+      candidates = [...uids].sort((a, b) => b - a).slice(0, maxMessages);
+    }
+    const sizes = await client.fetchMessageSizes(candidates);
     const { selected, skipped, truncated } = selectUidsWithinBudget(
-      newestUids,
+      candidates,
       sizes,
     );
 
@@ -207,10 +273,94 @@ async function fetchRecentInboxMessages(
       selected,
       IMAP_MAX_MESSAGE_BYTES,
     );
-    return { uidValidity, messages };
+    return { uidValidity, mode, candidates, selected, messages };
   } finally {
     await client.close();
   }
+}
+
+/**
+ * The watermark this run may store: max(candidates) when every candidate was
+ * processed, otherwise just below the lowest unprocessed one. `undefined`
+ * leaves the stored value alone; `null` removes it.
+ */
+function resolveNextWatermark(
+  fetched: InboxFetchResult,
+  previous: ImapSyncWatermark | null,
+  outcome: IngestionItemsOutcome,
+): ImapSyncWatermark | null | undefined {
+  const { uidValidity, mode, candidates, selected, messages } = fetched;
+  if (candidates.length === 0) {
+    if (mode === "reset") return null;
+    return undefined;
+  }
+
+  const sourced = new Set(messages.map((message) => message.uid));
+  const processed = new Set(
+    selected.filter(
+      (uid) =>
+        sourced.has(uid) &&
+        !outcome.erroredExternalMessageIds.has(`uid:${uidValidity}:${uid}`),
+    ),
+  );
+  const unprocessed = candidates.filter((uid) => !processed.has(uid));
+  let lastUid =
+    unprocessed.length === 0
+      ? candidates.reduce((a, b) => Math.max(a, b))
+      : unprocessed.reduce((a, b) => Math.min(a, b)) - 1;
+  if (mode === "incremental" && previous) {
+    lastUid = Math.max(lastUid, previous.lastUid);
+  }
+  return { uidValidity, lastUid };
+}
+
+/**
+ * Writes the watermark into the account's current credentials, unless the
+ * account was reconnected or disconnected during the sync. The write only
+ * lands if the credentials still equal the ones read here, so it can never
+ * restore removed or replaced credentials.
+ */
+async function persistImapSyncWatermark(
+  accountKey: string,
+  connected: StoredImapCredentials,
+  watermark: ImapSyncWatermark | null,
+): Promise<ImapWatermarkWrite> {
+  const integration = await getPostApplicationIntegration("imap", accountKey);
+  const currentCredentials = integration?.credentials ?? null;
+  const current = parseStoredImapCredentials(currentCredentials);
+  if (
+    !currentCredentials ||
+    !current ||
+    current.host !== connected.host ||
+    current.port !== connected.port ||
+    current.username !== connected.username ||
+    current.passwordEncrypted !== connected.passwordEncrypted
+  ) {
+    return "skipped";
+  }
+
+  const { syncWatermark: storedWatermark, ...otherCredentials } =
+    currentCredentials;
+  if (
+    watermark === null
+      ? !("syncWatermark" in currentCredentials)
+      : isDeepStrictEqual(storedWatermark, watermark)
+  ) {
+    return "unchanged";
+  }
+
+  const written = await replacePostApplicationIntegrationCredentialsIfUnchanged(
+    {
+      provider: "imap",
+      accountKey,
+      expectedCredentials: currentCredentials,
+      credentials:
+        watermark === null
+          ? otherCredentials
+          : { ...currentCredentials, syncWatermark: watermark },
+    },
+  );
+  return written ? "stored" : "skipped";
 }
 
 export async function runImapIngestionSync(args: {
@@ -236,6 +386,8 @@ export async function runImapIngestionSync(args: {
 
   const searchDays = Math.max(1, args.searchDays ?? DEFAULT_SEARCH_DAYS);
   const maxMessages = Math.max(1, args.maxMessages ?? DEFAULT_MAX_MESSAGES);
+  const previousWatermark = parseImapSyncWatermark(integration.credentials);
+  let fetched: InboxFetchResult | null = null;
 
   return runPostApplicationIngestion({
     provider: "imap",
@@ -243,7 +395,7 @@ export async function runImapIngestionSync(args: {
     integrationId: integration.id,
     failureErrorCode: "IMAP_SYNC_FAILED",
     listItems: async (): Promise<IngestItem[]> => {
-      const { uidValidity, messages } = await fetchRecentInboxMessages(
+      fetched = await fetchInboxMessages(
         args.accountKey,
         {
           host: stored.host,
@@ -252,9 +404,11 @@ export async function runImapIngestionSync(args: {
           username: stored.username,
           password,
         },
+        previousWatermark,
         searchDays,
         maxMessages,
       );
+      const { uidValidity, messages } = fetched;
 
       return messages.map((message) => ({
         externalMessageId: `uid:${uidValidity}:${message.uid}`,
@@ -267,6 +421,27 @@ export async function runImapIngestionSync(args: {
             },
           ),
       }));
+    },
+    onItemsProcessed: async (outcome) => {
+      if (!fetched) return;
+      const next = resolveNextWatermark(fetched, previousWatermark, outcome);
+      const write =
+        next === undefined
+          ? "unchanged"
+          : await persistImapSyncWatermark(args.accountKey, stored, next);
+      logger.info("IMAP sync watermark", {
+        provider: "imap",
+        accountKey: args.accountKey,
+        mode: fetched.mode,
+        candidateCount: fetched.candidates.length,
+        previousLastUid: previousWatermark?.lastUid ?? null,
+        newLastUid:
+          write === "skipped"
+            ? null
+            : ((next === undefined ? previousWatermark : next)?.lastUid ??
+              null),
+        watermarkWrite: write,
+      });
     },
   });
 }

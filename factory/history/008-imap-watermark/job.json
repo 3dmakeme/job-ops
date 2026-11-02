@@ -1,0 +1,41 @@
+{
+  "id": "008-imap-watermark",
+  "title": "IMAP sync watermark",
+  "feature": "IMAP incremental sync watermark: per IMAP account, store the last-seen UID together with the mailbox uidValidity (for example in the integration sync state), and on later syncs search and fetch only UIDs greater than the watermark. The first sync keeps the existing 90-day / 100-message window. If uidValidity changes, discard the watermark and fall back to the full window. Only advance the watermark past messages that were actually fetched and processed (never past messages skipped by the size budget or that errored), so nothing is silently lost. Keep the Message-ID dedupe as a safety net. Read-only on the mailbox, tenant-scoped, with tests for first sync, incremental sync, uidValidity reset, skipped/errored messages, and no change to Gmail behaviour.",
+  "branch": "factory/008-imap-watermark",
+  "base": "main",
+  "worktree": "/Users/richards/Code/job-ops-factory/008-imap-watermark",
+  "reviewers": [
+    {
+      "name": "security",
+      "agent": "fm-factory:reviewer-security",
+      "skills": [
+        "fm-factory:secure-endpoint"
+      ]
+    },
+    {
+      "name": "ux",
+      "agent": "fm-factory:reviewer-ux",
+      "browser": true
+    },
+    {
+      "name": "ui",
+      "agent": "fm-factory:reviewer-ui",
+      "browser": true
+    },
+    {
+      "name": "code",
+      "agent": "fm-factory:reviewer-code"
+    }
+  ],
+  "models": {},
+  "stage": "merged",
+  "round": 2,
+  "reviews": {
+    "security": "PASS",
+    "ux": "PASS",
+    "ui": "PASS",
+    "code": "PASS"
+  },
+  "merged": "2026-11-02"
+}
