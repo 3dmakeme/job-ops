@@ -10,10 +10,13 @@ const mocks = vi.hoisted(() => ({
     connect: vi.fn(),
     openInboxReadOnly: vi.fn(),
     searchUidsSince: vi.fn(),
+    searchUidsAfter: vi.fn(),
+    fetchMessageSizes: vi.fn(),
     fetchMessageSources: vi.fn(),
     close: vi.fn(),
   },
   createImapClient: vi.fn(),
+  classifyWithSmartRouter: vi.fn(),
 }));
 
 vi.mock(
@@ -25,6 +28,33 @@ vi.mock(
     createImapClient: mocks.createImapClient,
   }),
 );
+
+vi.mock(
+  "@server/services/post-application/ingestion/email-router",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@server/services/post-application/ingestion/email-router")
+    >()),
+    classifyWithSmartRouter: mocks.classifyWithSmartRouter,
+  }),
+);
+
+function sourcesFor(uids: number[]) {
+  return uids.map((uid) => ({
+    uid,
+    source: Buffer.from(
+      [
+        "From: talent@example.net",
+        `Subject: Message ${uid}`,
+        "Date: Mon, 02 Nov 2026 10:00:00 +0000",
+        `Message-ID: <msg-${uid}@example.net>`,
+        "",
+        `Body of message ${uid}.`,
+      ].join("\r\n"),
+      "utf8",
+    ),
+  }));
+}
 
 describe.sequential("imap post-application provider", () => {
   const originalEnv = { ...process.env };
@@ -49,6 +79,24 @@ describe.sequential("imap post-application provider", () => {
       connectPayload: { payload },
     });
 
+  async function readStoredCredentialsFor(
+    tenantId: string,
+  ): Promise<Record<string, unknown> | null> {
+    const rows = await db.select().from(schema.postApplicationIntegrations);
+    const row = rows.find(
+      (candidate) =>
+        candidate.provider === "imap" && candidate.tenantId === tenantId,
+    );
+    return (row?.credentials as Record<string, unknown> | null) ?? null;
+  }
+
+  const sync = () =>
+    executePostApplicationProviderAction({
+      provider: "imap",
+      action: "sync",
+      accountKey: "default",
+    });
+
   async function readStoredCredentials(): Promise<unknown> {
     const rows = await db.select().from(schema.postApplicationIntegrations);
     const row = rows.find((candidate) => candidate.provider === "imap");
@@ -70,6 +118,24 @@ describe.sequential("imap post-application provider", () => {
     for (const fn of Object.values(mocks.client)) fn.mockReset();
     mocks.client.connect.mockResolvedValue(undefined);
     mocks.client.close.mockResolvedValue(undefined);
+    mocks.client.openInboxReadOnly.mockResolvedValue({ uidValidity: "777" });
+    mocks.client.searchUidsSince.mockResolvedValue([10, 11, 12]);
+    mocks.client.searchUidsAfter.mockResolvedValue([]);
+    mocks.client.fetchMessageSizes.mockImplementation(async (uids: number[]) =>
+      uids.map((uid) => ({ uid, size: 1024 })),
+    );
+    mocks.client.fetchMessageSources.mockImplementation(
+      async (uids: number[]) => sourcesFor(uids),
+    );
+    mocks.classifyWithSmartRouter.mockReset().mockResolvedValue({
+      bestMatchId: null,
+      confidence: 10,
+      stageTarget: "no_change",
+      messageType: "other",
+      isRelevant: false,
+      stageEventPayload: null,
+      reason: "not relevant",
+    });
 
     await import("@server/db/migrate");
     ({ db, schema } = await import("@server/db"));
@@ -279,6 +345,84 @@ describe.sequential("imap post-application provider", () => {
       accountKey: "default",
     });
     expect(ownStatus.status.connected).toBe(true);
+  });
+
+  it("stores the sync watermark without exposing it in status", async () => {
+    await connect(validPayload);
+
+    await sync();
+
+    const credentials = await readStoredCredentials();
+    expect(credentials).toMatchObject({
+      host: "mail.example.com",
+      syncWatermark: { uidValidity: "777", lastUid: 12 },
+    });
+
+    const response = await executePostApplicationProviderAction({
+      provider: "imap",
+      action: "status",
+      accountKey: "default",
+    });
+    const publicCredentials = response.status.integration?.credentials ?? {};
+    expect(Object.keys(publicCredentials).sort()).toEqual(
+      ["host", "port", "tls", "username", "hasPassword"].sort(),
+    );
+    expect(JSON.stringify(response)).not.toContain("syncWatermark");
+
+    mocks.client.searchUidsAfter.mockResolvedValue([13]);
+    await sync();
+
+    expect(mocks.client.searchUidsAfter).toHaveBeenCalledWith(12);
+    expect(mocks.client.searchUidsSince).toHaveBeenCalledTimes(1);
+    expect(await readStoredCredentials()).toMatchObject({
+      syncWatermark: { uidValidity: "777", lastUid: 13 },
+    });
+  });
+
+  it("resets the watermark when the account is reconnected", async () => {
+    await connect(validPayload);
+    await sync();
+    expect(await readStoredCredentials()).toHaveProperty("syncWatermark");
+
+    await connect(validPayload);
+
+    expect(await readStoredCredentials()).not.toHaveProperty("syncWatermark");
+  });
+
+  it("keeps one tenant's watermark away from another tenant's sync", async () => {
+    await connect(validPayload);
+    await sync();
+    const ownTenantId = (
+      await db.select().from(schema.postApplicationIntegrations)
+    )[0]?.tenantId as string;
+    const ownBefore = await readStoredCredentialsFor(ownTenantId);
+    expect(ownBefore?.syncWatermark).toEqual({
+      uidValidity: "777",
+      lastUid: 12,
+    });
+
+    await db.insert(schema.tenants).values({
+      id: "tenant_b",
+      name: "Tenant B",
+      slug: "tenant-b",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const otherTenant = { requestId: "tenant-b", tenantId: "tenant_b" };
+    await runWithRequestContext(otherTenant, () => connect(validPayload));
+    mocks.client.searchUidsSince.mockClear();
+    mocks.client.searchUidsAfter.mockClear();
+    mocks.client.searchUidsSince.mockResolvedValue([20, 21]);
+
+    await runWithRequestContext(otherTenant, () => sync());
+
+    // Tenant B has no watermark of its own, so it runs a first sync.
+    expect(mocks.client.searchUidsAfter).not.toHaveBeenCalled();
+    expect(mocks.client.searchUidsSince).toHaveBeenCalledTimes(1);
+    expect(await readStoredCredentialsFor("tenant_b")).toMatchObject({
+      syncWatermark: { uidValidity: "777", lastUid: 21 },
+    });
+    expect(await readStoredCredentialsFor(ownTenantId)).toEqual(ownBefore);
   });
 
   it("maps a sync login failure to 400 and marks the integration as error", async () => {

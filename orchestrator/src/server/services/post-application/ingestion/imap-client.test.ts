@@ -140,6 +140,42 @@ describe("imap client", () => {
     );
   });
 
+  it("searches UIDs above the watermark and drops any at or below it", async () => {
+    // A server resolves `*` to its highest UID, which may be <= lastUid.
+    mocks.instance.search.mockResolvedValueOnce([9, 10, 11, 14]);
+
+    await expect(createImapClient(config).searchUidsAfter(10)).resolves.toEqual(
+      [11, 14],
+    );
+    expect(mocks.instance.search).toHaveBeenCalledWith(
+      { uid: "11:*" },
+      { uid: true },
+    );
+    expect(mocks.instance.mailboxOpen).not.toHaveBeenCalled();
+  });
+
+  it("returns no UIDs when the search above the watermark matches nothing", async () => {
+    mocks.instance.search.mockResolvedValueOnce(false);
+
+    await expect(createImapClient(config).searchUidsAfter(10)).resolves.toEqual(
+      [],
+    );
+  });
+
+  it("maps a search-after failure to a connection error", async () => {
+    mocks.instance.search.mockRejectedValueOnce(
+      Object.assign(new Error("BAD search"), { code: "EPIPE" }),
+    );
+
+    const error = await createImapClient(config)
+      .searchUidsAfter(10)
+      .catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ImapConnectionError);
+    expect(error.message).toBe("IMAP server search failed.");
+    expect(error.code).toBe("EPIPE");
+  });
+
   it("exports a 1 MiB per-message cap and a 32 MiB per-sync budget", () => {
     expect(IMAP_MAX_MESSAGE_BYTES).toBe(1024 * 1024);
     expect(IMAP_MAX_SYNC_BYTES).toBe(32 * 1024 * 1024);

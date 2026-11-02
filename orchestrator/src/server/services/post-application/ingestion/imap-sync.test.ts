@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
     connect: vi.fn(),
     openInboxReadOnly: vi.fn(),
     searchUidsSince: vi.fn(),
+    searchUidsAfter: vi.fn(),
     fetchMessageSizes: vi.fn(),
     fetchMessageSources: vi.fn(),
     close: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     messageFlagsRemove: vi.fn(),
     messageDelete: vi.fn(),
     messageMove: vi.fn(),
+    expunge: vi.fn(),
   },
   createImapClient: vi.fn(),
   decryptSecret: vi.fn(),
@@ -24,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   startPostApplicationSyncRun: vi.fn(),
   completePostApplicationSyncRun: vi.fn(),
   classifyWithSmartRouter: vi.fn(),
+  info: vi.fn(),
   warn: vi.fn(),
 }));
 
@@ -38,7 +41,12 @@ vi.mock("@infra/credential-crypto", () => ({
 }));
 
 vi.mock("@infra/logger", () => ({
-  logger: { info: vi.fn(), warn: mocks.warn, error: vi.fn(), debug: vi.fn() },
+  logger: {
+    info: mocks.info,
+    warn: mocks.warn,
+    error: vi.fn(),
+    debug: vi.fn(),
+  },
 }));
 
 vi.mock("@infra/product-analytics", () => ({
@@ -89,6 +97,8 @@ import { runImapIngestionSync } from "./imap-sync";
 const MiB = 1024 * 1024;
 const TRUNCATION_WARNING = "IMAP message exceeds size limit; truncating";
 const BUDGET_WARNING = "IMAP sync byte budget exceeded; skipping messages";
+const RESET_WARNING = "IMAP UIDVALIDITY changed; discarding sync watermark";
+const WATERMARK_LOG = "IMAP sync watermark";
 
 function rawMessage(headers: Record<string, string>, body: string): Buffer {
   const headerText = Object.entries(headers)
@@ -158,6 +168,40 @@ function connectedIntegration() {
   };
 }
 
+function integrationWith(extraCredentials: Record<string, unknown>) {
+  const integration = connectedIntegration();
+  return {
+    ...integration,
+    credentials: { ...integration.credentials, ...extraCredentials },
+  };
+}
+
+function messageFor(uid: number): Buffer {
+  return rawMessage(
+    {
+      From: "talent@example.net",
+      Subject: `Message ${uid}`,
+      Date: DATE_HEADER,
+      "Message-ID": `<msg-${uid}@example.net>`,
+    },
+    `Body of message ${uid}.`,
+  );
+}
+
+function sourcesFor(uids: number[]) {
+  return uids.map((uid) => ({ uid, source: messageFor(uid) }));
+}
+
+function credentialWrites() {
+  return mocks.updatePostApplicationIntegrationSyncState.mock.calls
+    .map(([input]) => input)
+    .filter((input) => input.credentials !== undefined);
+}
+
+function storedWatermarks() {
+  return credentialWrites().map((input) => input.credentials.syncWatermark);
+}
+
 function upsertCallFor(externalMessageId: string) {
   return mocks.upsertPostApplicationMessage.mock.calls
     .map(([input]) => input)
@@ -170,6 +214,7 @@ beforeEach(() => {
   mocks.client.connect.mockResolvedValue(undefined);
   mocks.client.openInboxReadOnly.mockResolvedValue({ uidValidity: "777" });
   mocks.client.searchUidsSince.mockResolvedValue([10, 12, 11]);
+  mocks.client.searchUidsAfter.mockResolvedValue([]);
   mocks.client.fetchMessageSizes.mockImplementation(async (uids: number[]) =>
     uids.map((uid) => ({ uid, size: 4096 })),
   );
@@ -407,14 +452,28 @@ describe("imap ingestion sync", () => {
     );
   });
 
-  it("never calls a flag-setting, move or delete method", async () => {
+  it.each([
+    ["first", null],
+    ["incremental", { uidValidity: "777", lastUid: 9 }],
+    ["reset", { uidValidity: "555", lastUid: 9 }],
+  ])("never calls a flag-setting, move, delete or expunge method (%s sync)", async (_mode, watermark) => {
+    if (watermark) {
+      mocks.getPostApplicationIntegration.mockResolvedValue(
+        integrationWith({ syncWatermark: watermark }),
+      );
+    }
+    mocks.client.searchUidsAfter.mockResolvedValue([10, 11, 12]);
+
     await runImapIngestionSync({ accountKey: "default" });
 
+    expect(mocks.client.openInboxReadOnly).toHaveBeenCalledTimes(1);
+    expect(mocks.client.fetchMessageSources).toHaveBeenCalledTimes(1);
     expect(mocks.client.messageFlagsAdd).not.toHaveBeenCalled();
     expect(mocks.client.messageFlagsSet).not.toHaveBeenCalled();
     expect(mocks.client.messageFlagsRemove).not.toHaveBeenCalled();
     expect(mocks.client.messageDelete).not.toHaveBeenCalled();
     expect(mocks.client.messageMove).not.toHaveBeenCalled();
+    expect(mocks.client.expunge).not.toHaveBeenCalled();
   });
 
   it("treats an undecryptable password as not connected", async () => {
@@ -559,5 +618,348 @@ describe("imap ingestion sync", () => {
     await expect(runImapIngestionSync({ accountKey: "other" })).rejects.toThrow(
       "IMAP account 'other' is not connected.",
     );
+  });
+
+  describe("sync watermark", () => {
+    it("first sync searches the 90-day window, takes the newest 100 and stores the max UID", async () => {
+      const uids = Array.from({ length: 150 }, (_, index) => index + 1);
+      mocks.client.searchUidsSince.mockResolvedValue(uids);
+      mocks.client.fetchMessageSources.mockImplementation(
+        async (selected: number[]) => sourcesFor(selected),
+      );
+      const before = Date.now();
+
+      await runImapIngestionSync({ accountKey: "default" });
+
+      const since = mocks.client.searchUidsSince.mock.calls[0]?.[0] as Date;
+      const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
+      expect(since.getTime()).toBeGreaterThanOrEqual(before - ninetyDaysMs);
+      expect(since.getTime()).toBeLessThanOrEqual(Date.now() - ninetyDaysMs);
+      expect(mocks.client.searchUidsAfter).not.toHaveBeenCalled();
+      const newest = Array.from({ length: 100 }, (_, index) => 150 - index);
+      expect(mocks.client.fetchMessageSizes).toHaveBeenCalledWith(newest);
+      expect(storedWatermarks()).toEqual([
+        { uidValidity: "777", lastUid: 150 },
+      ]);
+      expect(credentialWrites()[0]).toMatchObject({
+        provider: "imap",
+        accountKey: "default",
+      });
+      expect(mocks.info).toHaveBeenCalledWith(WATERMARK_LOG, {
+        provider: "imap",
+        accountKey: "default",
+        mode: "first",
+        candidateCount: 100,
+        previousLastUid: null,
+        newLastUid: 150,
+      });
+    });
+
+    it("first sync with no messages stores nothing", async () => {
+      mocks.client.searchUidsSince.mockResolvedValue([]);
+      mocks.client.fetchMessageSources.mockResolvedValue([]);
+
+      await runImapIngestionSync({ accountKey: "default" });
+
+      expect(credentialWrites()).toEqual([]);
+      expect(mocks.info).toHaveBeenCalledWith(
+        WATERMARK_LOG,
+        expect.objectContaining({ mode: "first", newLastUid: null }),
+      );
+    });
+
+    it("incremental sync fetches the oldest UIDs above the watermark and advances it", async () => {
+      mocks.getPostApplicationIntegration.mockResolvedValue(
+        integrationWith({ syncWatermark: { uidValidity: "777", lastUid: 20 } }),
+      );
+      mocks.client.searchUidsAfter.mockResolvedValue([25, 21, 23, 22, 24]);
+      mocks.client.fetchMessageSources.mockImplementation(
+        async (selected: number[]) => sourcesFor(selected),
+      );
+
+      const summary = await runImapIngestionSync({
+        accountKey: "default",
+        maxMessages: 3,
+        searchDays: 7,
+      });
+
+      expect(mocks.client.searchUidsAfter).toHaveBeenCalledWith(20);
+      expect(mocks.client.searchUidsSince).not.toHaveBeenCalled();
+      expect(mocks.client.fetchMessageSizes).toHaveBeenCalledWith([21, 22, 23]);
+      expect(mocks.client.fetchMessageSources).toHaveBeenCalledWith(
+        [21, 22, 23],
+        IMAP_MAX_MESSAGE_BYTES,
+      );
+      expect(summary.discovered).toBe(3);
+      expect(storedWatermarks()).toEqual([{ uidValidity: "777", lastUid: 23 }]);
+      expect(mocks.info).toHaveBeenCalledWith(WATERMARK_LOG, {
+        provider: "imap",
+        accountKey: "default",
+        mode: "incremental",
+        candidateCount: 3,
+        previousLastUid: 20,
+        newLastUid: 23,
+      });
+      expect(mocks.warn).not.toHaveBeenCalled();
+    });
+
+    it("discards the watermark and uses the full window when uidValidity changes", async () => {
+      mocks.getPostApplicationIntegration.mockResolvedValue(
+        integrationWith({
+          syncWatermark: { uidValidity: "555", lastUid: 500 },
+        }),
+      );
+
+      await runImapIngestionSync({ accountKey: "default" });
+
+      expect(mocks.client.searchUidsAfter).not.toHaveBeenCalled();
+      expect(mocks.client.searchUidsSince).toHaveBeenCalledTimes(1);
+      expect(mocks.client.fetchMessageSizes).toHaveBeenCalledWith([12, 11, 10]);
+      expect(mocks.warn).toHaveBeenCalledWith(RESET_WARNING, {
+        provider: "imap",
+        accountKey: "default",
+        previousUidValidity: "555",
+        uidValidity: "777",
+      });
+      expect(storedWatermarks()).toEqual([{ uidValidity: "777", lastUid: 12 }]);
+      expect(mocks.info).toHaveBeenCalledWith(WATERMARK_LOG, {
+        provider: "imap",
+        accountKey: "default",
+        mode: "reset",
+        candidateCount: 3,
+        previousLastUid: 500,
+        newLastUid: 12,
+      });
+    });
+
+    it("removes the old watermark when a reset finds no messages", async () => {
+      mocks.getPostApplicationIntegration.mockResolvedValue(
+        integrationWith({
+          syncWatermark: { uidValidity: "555", lastUid: 500 },
+        }),
+      );
+      mocks.client.searchUidsSince.mockResolvedValue([]);
+      mocks.client.fetchMessageSources.mockResolvedValue([]);
+
+      await runImapIngestionSync({ accountKey: "default" });
+
+      const writes = credentialWrites();
+      expect(writes).toHaveLength(1);
+      expect(writes[0]?.credentials).toEqual(
+        connectedIntegration().credentials,
+      );
+      expect(writes[0]?.credentials).not.toHaveProperty("syncWatermark");
+    });
+
+    it("holds the watermark below a UID skipped by the byte budget", async () => {
+      mocks.getPostApplicationIntegration.mockResolvedValue(
+        integrationWith({ syncWatermark: { uidValidity: "777", lastUid: 50 } }),
+      );
+      // UIDs 51..82 leave 320 bytes, so 83 (1 MiB) is skipped and 84 fits.
+      const fullUids = Array.from({ length: 32 }, (_, index) => 51 + index);
+      mocks.client.searchUidsAfter.mockResolvedValue([...fullUids, 83, 84]);
+      mocks.client.fetchMessageSizes.mockResolvedValue([
+        ...fullUids.map((uid) => ({ uid, size: MiB - 10 })),
+        { uid: 83, size: MiB },
+        { uid: 84, size: 100 },
+      ]);
+      mocks.client.fetchMessageSources.mockImplementation(
+        async (selected: number[]) => sourcesFor(selected),
+      );
+
+      const summary = await runImapIngestionSync({ accountKey: "default" });
+
+      expect(mocks.client.fetchMessageSources).toHaveBeenCalledWith(
+        [...fullUids, 84],
+        IMAP_MAX_MESSAGE_BYTES,
+      );
+      expect(summary).toMatchObject({ discovered: 33, errored: 0 });
+      expect(mocks.warn).toHaveBeenCalledWith(
+        BUDGET_WARNING,
+        expect.objectContaining({ skippedUids: [83] }),
+      );
+      expect(storedWatermarks()).toEqual([{ uidValidity: "777", lastUid: 82 }]);
+    });
+
+    it("holds the watermark below a UID whose item errors", async () => {
+      mocks.getPostApplicationIntegration.mockResolvedValue(
+        integrationWith({ syncWatermark: { uidValidity: "777", lastUid: 5 } }),
+      );
+      mocks.client.searchUidsAfter.mockResolvedValue([10, 11, 12]);
+      mocks.client.fetchMessageSources.mockResolvedValue([
+        { uid: 12, source: textMessage },
+        { uid: 11, source: null as unknown as Buffer },
+        { uid: 10, source: unthreadedMessage },
+      ]);
+
+      const summary = await runImapIngestionSync({ accountKey: "default" });
+
+      expect(summary).toMatchObject({ discovered: 3, errored: 1 });
+      expect(storedWatermarks()).toEqual([{ uidValidity: "777", lastUid: 10 }]);
+    });
+
+    it("holds the watermark below a UID the server returned no source for", async () => {
+      mocks.getPostApplicationIntegration.mockResolvedValue(
+        integrationWith({ syncWatermark: { uidValidity: "777", lastUid: 5 } }),
+      );
+      mocks.client.searchUidsAfter.mockResolvedValue([10, 11, 12]);
+      mocks.client.fetchMessageSources.mockResolvedValue([
+        { uid: 12, source: textMessage },
+        { uid: 10, source: unthreadedMessage },
+      ]);
+
+      const summary = await runImapIngestionSync({ accountKey: "default" });
+
+      expect(mocks.client.fetchMessageSources).toHaveBeenCalledWith(
+        [10, 11, 12],
+        IMAP_MAX_MESSAGE_BYTES,
+      );
+      expect(summary).toMatchObject({ discovered: 2, errored: 0 });
+      expect(storedWatermarks()).toEqual([{ uidValidity: "777", lastUid: 10 }]);
+    });
+
+    it("never moves the watermark backwards and skips an unchanged write", async () => {
+      mocks.getPostApplicationIntegration.mockResolvedValue(
+        integrationWith({ syncWatermark: { uidValidity: "777", lastUid: 9 } }),
+      );
+      mocks.client.searchUidsAfter.mockResolvedValue([10, 11, 12]);
+      mocks.client.fetchMessageSources.mockResolvedValue([
+        { uid: 12, source: textMessage },
+        { uid: 11, source: htmlMessage },
+      ]);
+
+      await runImapIngestionSync({ accountKey: "default" });
+
+      expect(credentialWrites()).toEqual([]);
+      expect(mocks.info).toHaveBeenCalledWith(
+        WATERMARK_LOG,
+        expect.objectContaining({ previousLastUid: 9, newLastUid: 9 }),
+      );
+    });
+
+    it("leaves the watermark unchanged when nothing is above it", async () => {
+      mocks.getPostApplicationIntegration.mockResolvedValue(
+        integrationWith({ syncWatermark: { uidValidity: "777", lastUid: 40 } }),
+      );
+      mocks.client.searchUidsAfter.mockResolvedValue([]);
+      mocks.client.fetchMessageSources.mockResolvedValue([]);
+
+      const summary = await runImapIngestionSync({ accountKey: "default" });
+
+      expect(mocks.client.searchUidsAfter).toHaveBeenCalledWith(40);
+      expect(mocks.client.searchUidsSince).not.toHaveBeenCalled();
+      expect(summary.discovered).toBe(0);
+      expect(credentialWrites()).toEqual([]);
+      expect(mocks.info).toHaveBeenCalledWith(WATERMARK_LOG, {
+        provider: "imap",
+        accountKey: "default",
+        mode: "incremental",
+        candidateCount: 0,
+        previousLastUid: 40,
+        newLastUid: 40,
+      });
+    });
+
+    it.each([
+      ["a non-object", "garbage"],
+      ["an array", [1, 2]],
+      ["a numeric uidValidity", { uidValidity: 777, lastUid: 5 }],
+      ["a string lastUid", { uidValidity: "777", lastUid: "5" }],
+      ["a negative lastUid", { uidValidity: "777", lastUid: -1 }],
+      ["a fractional lastUid", { uidValidity: "777", lastUid: 1.5 }],
+      ["a missing lastUid", { uidValidity: "777" }],
+    ])("treats %s watermark as a first sync", async (_label, syncWatermark) => {
+      mocks.getPostApplicationIntegration.mockResolvedValue(
+        integrationWith({ syncWatermark }),
+      );
+
+      await runImapIngestionSync({ accountKey: "default" });
+
+      expect(mocks.client.searchUidsSince).toHaveBeenCalledTimes(1);
+      expect(mocks.client.searchUidsAfter).not.toHaveBeenCalled();
+      expect(mocks.warn).not.toHaveBeenCalledWith(
+        RESET_WARNING,
+        expect.anything(),
+      );
+      expect(storedWatermarks()).toEqual([{ uidValidity: "777", lastUid: 12 }]);
+      expect(mocks.info).toHaveBeenCalledWith(
+        WATERMARK_LOG,
+        expect.objectContaining({ mode: "first", previousLastUid: null }),
+      );
+    });
+
+    it("keeps every other credential key when writing the watermark", async () => {
+      const extra = {
+        displayHint: "keep me",
+        nested: { a: 1, b: [true, null] },
+      };
+      const integration = integrationWith({
+        ...extra,
+        syncWatermark: { uidValidity: "777", lastUid: 9 },
+      });
+      mocks.getPostApplicationIntegration.mockResolvedValue(integration);
+      mocks.client.searchUidsAfter.mockResolvedValue([10, 11, 12]);
+
+      await runImapIngestionSync({ accountKey: "default" });
+
+      const writes = credentialWrites();
+      expect(writes).toHaveLength(1);
+      expect(writes[0]?.credentials).toEqual({
+        ...integration.credentials,
+        syncWatermark: { uidValidity: "777", lastUid: 12 },
+      });
+      expect(writes[0]?.credentials.passwordEncrypted).toBe(
+        "v1:iv:tag:ciphertext",
+      );
+      expect(Object.keys(writes[0]?.credentials ?? {})).toEqual(
+        Object.keys(integration.credentials),
+      );
+    });
+
+    it("skips the write when the account was reconnected during the sync", async () => {
+      const reconnected = integrationWith({ host: "imap.other.example" });
+      mocks.getPostApplicationIntegration
+        .mockResolvedValueOnce(connectedIntegration())
+        .mockResolvedValueOnce(reconnected);
+
+      await runImapIngestionSync({ accountKey: "default" });
+
+      expect(mocks.getPostApplicationIntegration).toHaveBeenCalledTimes(2);
+      expect(credentialWrites()).toEqual([]);
+    });
+
+    it("skips the write when the account was disconnected during the sync", async () => {
+      mocks.getPostApplicationIntegration
+        .mockResolvedValueOnce(connectedIntegration())
+        .mockResolvedValueOnce({
+          ...connectedIntegration(),
+          status: "disconnected",
+          credentials: null,
+        });
+
+      await runImapIngestionSync({ accountKey: "default" });
+
+      expect(credentialWrites()).toEqual([]);
+    });
+
+    it("fails the run when the watermark cannot be stored", async () => {
+      mocks.updatePostApplicationIntegrationSyncState.mockImplementation(
+        async (input) => {
+          if (input.credentials !== undefined) throw new Error("disk full");
+          return null;
+        },
+      );
+
+      await expect(
+        runImapIngestionSync({ accountKey: "default" }),
+      ).rejects.toThrow("disk full");
+      expect(mocks.completePostApplicationSyncRun).toHaveBeenCalledTimes(1);
+      expect(mocks.completePostApplicationSyncRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "failed",
+          errorCode: "IMAP_SYNC_FAILED",
+        }),
+      );
+    });
   });
 });
