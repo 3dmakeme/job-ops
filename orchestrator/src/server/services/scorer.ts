@@ -15,6 +15,8 @@ import {
 import { isConfigurationFailure } from "./llm/policies/configuration-error";
 import type { JsonSchemaDefinition } from "./llm/types";
 import { stripMarkdownCodeFences } from "./llm/utils/json";
+import { shouldUseJev } from "./jev/client";
+import { scoreJobWithJev } from "./jev/job-scoring";
 import { createConfiguredLlmService, resolveLlmModel } from "./modelSelection";
 import { renderPromptTemplate } from "./prompt-templates";
 import { filterProfileProjectsForAi } from "./resumeProjects";
@@ -267,7 +269,12 @@ function applySalaryPenalty(
 export async function scoreJobSuitability(
   job: Job,
   profile: Record<string, unknown>,
-  options: { scoringInstructions?: string; skipHostedUsage?: boolean } = {},
+  options: {
+    scoringInstructions?: string;
+    skipHostedUsage?: boolean;
+    /** Skip Jev and always run the LLM, keeping its brief and fact review. */
+    briefOnly?: boolean;
+  } = {},
 ): Promise<SuitabilityResult> {
   if (!options.skipHostedUsage) {
     return withHostedUsageReservation({ action: "tailoring" }, async () => ({
@@ -287,6 +294,32 @@ export async function scoreJobSuitability(
   const scoringInstructions = Object.hasOwn(options, "scoringInstructions")
     ? (options.scoringInstructions ?? "")
     : (settings.scoringInstructions?.value ?? "");
+
+  // Jev scores first. Below the brief cutoff the LLM is skipped entirely and
+  // the brief is generated when the job is first opened. A Jev failure falls
+  // through to the LLM, exactly as if Jev were not selected.
+  let jevScore: Awaited<ReturnType<typeof scoreJobWithJev>> | null = null;
+  if (!options.briefOnly && (await shouldUseJev("scoringEngine"))) {
+    try {
+      jevScore = await scoreJobWithJev(job, profile);
+    } catch (error) {
+      logger.warn("Jev scoring failed; using the configured LLM", {
+        jobId: job.id,
+        error,
+      });
+    }
+  }
+  if (jevScore && jevScore.score < settings.jevBriefCutoff.value) {
+    const penalised = applySalaryPenalty(job, jevScore.score, jevScore.reason, {
+      penalizeMissingSalary: settings.penalizeMissingSalary.value,
+      missingSalaryPenalty: settings.missingSalaryPenalty.value,
+    });
+    return {
+      score: penalised.score,
+      reason: penalised.reason,
+      jobBrief: null,
+    };
+  }
 
   const prompt = buildScoringPrompt(job, sanitizeProfileForPrompt(aiProfile), {
     instructions: scoringInstructions,
@@ -327,7 +360,10 @@ export async function scoreJobSuitability(
     throw new ScoringUnavailableError(`AI scoring failed: ${result.error}`);
   }
 
-  const { score, reason } = result.data;
+  // When Jev scored this job it is the source of truth for the number; the
+  // LLM contributes only the brief and the job-fact review.
+  const score = jevScore ? jevScore.score : result.data.score;
+  const reason = jevScore ? jevScore.reason : result.data.reason;
 
   // Validate we got a reasonable response
   if (typeof score !== "number" || Number.isNaN(score)) {
@@ -709,4 +745,16 @@ export async function scoreAndRankJobs(
     if (b.suitabilityScore == null) return -1;
     return b.suitabilityScore - a.suitabilityScore;
   });
+}
+
+/**
+ * Generate the job brief (and job-fact review) without changing the score.
+ * Used for jobs that Jev scored below the brief cutoff, when first opened.
+ */
+export async function generateJobBrief(
+  job: Job,
+  profile: Record<string, unknown>,
+): Promise<{ jobBrief: string | null; jobUpdates: UpdateJobInput }> {
+  const result = await scoreJobSuitability(job, profile, { briefOnly: true });
+  return { jobBrief: result.jobBrief, jobUpdates: result.jobUpdates ?? {} };
 }

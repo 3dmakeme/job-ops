@@ -180,6 +180,16 @@ export const createAppSettings = (
     default: "llm",
     override: null,
   },
+  scoringEngine: {
+    value: "llm",
+    default: "llm",
+    override: null,
+  },
+  jevBriefCutoff: {
+    value: 40,
+    default: 40,
+    override: null,
+  },
   pdfPaperSize: {
     value: "auto",
     default: "auto",

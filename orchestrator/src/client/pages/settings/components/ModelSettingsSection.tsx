@@ -1,6 +1,9 @@
 import { LlmModelConfiguration } from "@client/components/llmmodelconfiguration/LlmModelConfiguration";
 import { SettingsSectionFrame } from "@client/pages/settings/components/SettingsSectionFrame";
-import { JudgmentEngineSelect } from "@client/pages/settings/components/JudgmentEngineSection";
+import {
+  JevBriefCutoffInput,
+  JudgmentEngineSelect,
+} from "@client/pages/settings/components/JudgmentEngineSection";
 import type {
   JudgmentEngineValues,
   ModelValues,
@@ -141,6 +144,19 @@ export const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
           error: errors.modelProjectSelection?.message as string | undefined,
         }}
         purposeExtras={{
+          scoring: (
+            <div className="space-y-3">
+              <JudgmentEngineSelect
+                name="scoringEngine"
+                values={judgmentEngines}
+                disabled={disabled}
+              />
+              <JevBriefCutoffInput
+                values={judgmentEngines}
+                disabled={disabled}
+              />
+            </div>
+          ),
           projectSelection: (
             <JudgmentEngineSelect
               name="projectSelectionEngine"

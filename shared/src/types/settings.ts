@@ -270,6 +270,8 @@ export interface AppSettings {
   typstTheme: Resolved<TypstTheme>;
   projectSelectionEngine: Resolved<JudgmentEngine>;
   emailRoutingEngine: Resolved<JudgmentEngine>;
+  scoringEngine: Resolved<JudgmentEngine>;
+  jevBriefCutoff: Resolved<number>;
   pdfPaperSize: Resolved<PdfPaperSize>;
   ukvisajobsMaxJobs: Resolved<number>;
   adzunaMaxJobsPerTerm: Resolved<number>;

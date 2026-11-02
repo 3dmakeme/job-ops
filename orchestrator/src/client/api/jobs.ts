@@ -326,6 +326,10 @@ export async function summarizeJob(
   });
 }
 
+export async function generateJobBrief(id: string): Promise<Job> {
+  return fetchApi<Job>(`/jobs/${id}/brief`, { method: "POST" });
+}
+
 export async function generateJobPdf(id: string): Promise<Job> {
   return fetchApi<Job>(`/jobs/${id}/generate-pdf`, {
     method: "POST",

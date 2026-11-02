@@ -84,6 +84,8 @@ const DEFAULT_FORM_VALUES: UpdateSettingsInput = {
   typstTheme: "classic",
   projectSelectionEngine: null,
   emailRoutingEngine: null,
+  scoringEngine: null,
+  jevBriefCutoff: null,
   pdfPaperSize: "auto",
   rxresumeBaseResumeId: null,
   showSponsorInfo: null,
@@ -362,7 +364,12 @@ const SECTION_FIELD_MAP: Record<
     "tailoringPromptTemplate",
     "scoringPromptTemplate",
   ],
-  "judgment-engines": ["projectSelectionEngine", "emailRoutingEngine"],
+  "judgment-engines": [
+    "projectSelectionEngine",
+    "emailRoutingEngine",
+    "scoringEngine",
+    "jevBriefCutoff",
+  ],
   scoring: [
     "penalizeMissingSalary",
     "missingSalaryPenalty",
@@ -461,6 +468,8 @@ const NULL_SETTINGS_PAYLOAD: UpdateSettingsInput = {
   typstTheme: null,
   projectSelectionEngine: null,
   emailRoutingEngine: null,
+  scoringEngine: null,
+  jevBriefCutoff: null,
   pdfPaperSize: null,
   rxresumeBaseResumeId: null,
   showSponsorInfo: null,
@@ -531,6 +540,8 @@ const mapSettingsToForm = (data: AppSettings): UpdateSettingsInput => ({
   typstTheme: data.typstTheme.override ?? data.typstTheme.value,
   projectSelectionEngine: data.projectSelectionEngine.override,
   emailRoutingEngine: data.emailRoutingEngine.override,
+  scoringEngine: data.scoringEngine.override,
+  jevBriefCutoff: data.jevBriefCutoff.override,
   pdfPaperSize: data.pdfPaperSize.override ?? data.pdfPaperSize.value,
   rxresumeBaseResumeId: data.rxresumeBaseResumeId,
   showSponsorInfo: data.showSponsorInfo.override,
@@ -793,6 +804,14 @@ const getDerivedSettings = (settings: AppSettings | null) => {
       emailRoutingEngine: {
         effective: settings?.emailRoutingEngine?.value ?? "llm",
         default: settings?.emailRoutingEngine?.default ?? "llm",
+      },
+      scoringEngine: {
+        effective: settings?.scoringEngine?.value ?? "llm",
+        default: settings?.scoringEngine?.default ?? "llm",
+      },
+      jevBriefCutoff: {
+        effective: settings?.jevBriefCutoff?.value ?? 40,
+        default: settings?.jevBriefCutoff?.default ?? 40,
       },
     },
     scoring: {
@@ -1333,6 +1352,14 @@ export const SettingsPage: React.FC = () => {
         emailRoutingEngine: nullIfSame(
           data.emailRoutingEngine,
           judgmentEngines.emailRoutingEngine.default,
+        ),
+        scoringEngine: nullIfSame(
+          data.scoringEngine,
+          judgmentEngines.scoringEngine.default,
+        ),
+        jevBriefCutoff: nullIfSame(
+          data.jevBriefCutoff,
+          judgmentEngines.jevBriefCutoff.default,
         ),
         penalizeMissingSalary: nullIfSame(
           data.penalizeMissingSalary,

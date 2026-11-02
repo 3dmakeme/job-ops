@@ -60,6 +60,8 @@ export type BackupValues = {
 export type JudgmentEngineValues = {
   projectSelectionEngine: EffectiveDefault<"llm" | "jev">;
   emailRoutingEngine: EffectiveDefault<"llm" | "jev">;
+  scoringEngine: EffectiveDefault<"llm" | "jev">;
+  jevBriefCutoff: EffectiveDefault<number>;
 };
 
 export type ScoringValues = {

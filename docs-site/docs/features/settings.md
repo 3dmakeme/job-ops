@@ -87,12 +87,13 @@ Each meter includes completed usage and work currently in progress. Limits reset
 
 ### Judgment Engine
 
-Choose which engine makes two narrow judgment calls. Each has its own selector under **Settings → AI → Judgment Engine**:
+Choose which engine makes three narrow judgment calls. Each selector sits next to the matching model in **Settings → Model** (and together under **Settings → AI → Judgment Engine**):
 
 - **Project selection**: which resume projects fit a job.
+- **Job scoring**: how well a job fits your resume. Jev scores every job in about 200 ms from four graded questions (domain, seniority, skills, overall). Jobs scoring at or above the **brief cutoff** (default 40) still go to the LLM to write the job brief and check job facts; lower-scoring jobs skip the LLM and get their brief the first time you open them.
 - **Email routing**: whether a post-application email is relevant, which stage it signals, and which job it belongs to.
 
-Options are **Configured LLM** (default) and **TypeSafe Jev**. Jev answers typed Choice, Score and yes/no questions quickly and cheaply, but it does not write text. Summaries, tailoring, scoring briefs, and Ghostwriter always use your configured LLM.
+Options are **Configured LLM** (default) and **TypeSafe Jev**. Jev answers typed Choice, Score and yes/no questions quickly and cheaply, but it does not write text. Summaries, tailoring, job briefs, and Ghostwriter always use your configured LLM.
 
 Jev requires the `TYPESAFE_API_KEY` environment variable on the server (get a key at [console.typesafe.ai](https://console.typesafe.ai/keys)). If the key is missing, or a Jev call fails, JobOps falls back to the configured LLM so nothing is dropped.
 

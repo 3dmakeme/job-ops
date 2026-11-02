@@ -8,6 +8,9 @@ import {
   executeJobActionForJob,
   mapJobActionFailure,
 } from "@server/services/jobs/actions";
+import * as jobsRepo from "@server/repositories/jobs";
+import { getProfile } from "@server/services/profile";
+import { generateJobBrief } from "@server/services/scorer";
 import { resolvePdfFingerprintContext } from "@server/services/pdf-fingerprint";
 import { asyncPool } from "@server/utils/async-pool";
 import type { JobActionResult, JobActionStreamEvent } from "@shared/types";
@@ -313,4 +316,59 @@ jobsActionsRouter.post("/:id/rescore", async (req: Request, res: Response) => {
   );
   if (!result.ok) return fail(res, mapJobActionFailure(result));
   ok(res, await hydrateJobPdfFreshness(result.job));
+});
+
+const briefInFlight = new Map<string, Promise<unknown>>();
+
+/**
+ * Write the job brief for a job that was scored without one (Jev scored it
+ * below the brief cutoff). The score is left untouched.
+ */
+jobsActionsRouter.post("/:id/brief", async (req: Request, res: Response) => {
+  try {
+    const job = await jobsRepo.getJobById(req.params.id);
+    if (!job) throw new AppError({ status: 404, code: "NOT_FOUND", message: "Job not found" });
+
+    if (!job.jobBrief && job.jobDescription?.trim()) {
+      const existing = briefInFlight.get(job.id);
+      if (existing) {
+        await existing;
+      } else {
+        const run = (async () => {
+          const profile = await getProfile();
+          if (!profile || typeof profile !== "object" || Array.isArray(profile)) {
+            throw badRequest("Invalid resume profile format");
+          }
+          const { jobBrief, jobUpdates } = await generateJobBrief(
+            job,
+            profile as Record<string, unknown>,
+          );
+          if (jobBrief) {
+            await jobsRepo.updateJob(job.id, { ...jobUpdates, jobBrief });
+          }
+        })();
+        briefInFlight.set(job.id, run);
+        try {
+          await run;
+        } finally {
+          briefInFlight.delete(job.id);
+        }
+      }
+    }
+
+    const updated = await jobsRepo.getJobById(job.id);
+    if (!updated) throw new AppError({ status: 404, code: "NOT_FOUND", message: "Job not found" });
+    ok(res, await hydrateJobPdfFreshness(updated));
+  } catch (error) {
+    fail(
+      res,
+      error instanceof AppError
+        ? error
+        : new AppError({
+            status: 500,
+            code: "INTERNAL_ERROR",
+            message: error instanceof Error ? error.message : "Failed to generate brief",
+          }),
+    );
+  }
 });

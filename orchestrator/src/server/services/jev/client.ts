@@ -36,7 +36,10 @@ export function resetJevClientForTests(): void {
   warnedMissingKey = false;
 }
 
-type EngineSettingKey = "projectSelectionEngine" | "emailRoutingEngine";
+type EngineSettingKey =
+  | "projectSelectionEngine"
+  | "emailRoutingEngine"
+  | "scoringEngine";
 
 /**
  * True when the user selected Jev for this judgment and Jev is usable.

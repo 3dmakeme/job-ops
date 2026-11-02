@@ -2,7 +2,8 @@ import type { Job, JobBrief } from "@shared/types.js";
 import { motion, useReducedMotion } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import type React from "react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useGenerateJobBriefMutation } from "@/client/hooks/queries/useJobMutations";
 import { cn } from "@/lib/utils";
 
 type JobBriefPaneProps = {
@@ -23,6 +24,18 @@ export const JobBriefPane: React.FC<JobBriefPaneProps> = ({
 }) => {
   const brief = parseJobBrief(job.jobBrief);
   const prefersReducedMotion = useReducedMotion();
+
+  // Jobs Jev scored below the brief cutoff have no brief yet: write it the
+  // first time the job is opened (once per job per mount).
+  const briefMutation = useGenerateJobBriefMutation();
+  const requestedFor = useRef<string | null>(null);
+  const needsBrief =
+    !brief && job.suitabilityScore != null && Boolean(job.jobDescription?.trim());
+  useEffect(() => {
+    if (!needsBrief || requestedFor.current === job.id) return;
+    requestedFor.current = job.id;
+    briefMutation.mutate(job.id);
+  }, [needsBrief, job.id, briefMutation]);
 
   const bulletSections = useMemo(() => {
     if (!brief) return [];
@@ -52,7 +65,11 @@ export const JobBriefPane: React.FC<JobBriefPaneProps> = ({
       >
         <FitLine job={job} />
         <p className="mt-2 text-xs text-muted-foreground">
-          Recalculate match to generate a concise JD brief.
+          {briefMutation.isPending
+            ? "Writing a concise JD brief…"
+            : briefMutation.isError
+              ? "Could not write the brief. Recalculate match to try again."
+              : "Recalculate match to generate a concise JD brief."}
         </p>
       </section>
     );

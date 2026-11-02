@@ -3,6 +3,16 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { JobBriefPane } from "./JobBriefPane";
 
+const { mutateMock } = vi.hoisted(() => ({ mutateMock: vi.fn() }));
+
+vi.mock("@/client/hooks/queries/useJobMutations", () => ({
+  useGenerateJobBriefMutation: () => ({
+    mutate: mutateMock,
+    isPending: false,
+    isError: false,
+  }),
+}));
+
 vi.mock("framer-motion", async () => {
   const actual =
     await vi.importActual<typeof import("framer-motion")>("framer-motion");
@@ -55,6 +65,20 @@ describe("JobBriefPane", () => {
     expect(
       screen.getByText("Recalculate match to generate a concise JD brief."),
     ).toBeVisible();
+  });
+
+  it("asks for the brief once when a scored job has none", () => {
+    mutateMock.mockClear();
+    const job = createJob({
+      id: "lazy-brief",
+      jobBrief: null,
+      suitabilityScore: 25,
+      jobDescription: "Build things",
+    });
+    const { rerender } = render(<JobBriefPane job={job} />);
+    rerender(<JobBriefPane job={job} />);
+    expect(mutateMock).toHaveBeenCalledTimes(1);
+    expect(mutateMock).toHaveBeenCalledWith("lazy-brief");
   });
 
   it("does not render empty sections", () => {

@@ -36,6 +36,15 @@ vi.mock("./modelSelection", async (importOriginal) => {
   };
 });
 
+const { shouldUseJevMock, scoreJobWithJevMock } = vi.hoisted(() => ({
+  shouldUseJevMock: vi.fn(),
+  scoreJobWithJevMock: vi.fn(),
+}));
+
+vi.mock("./jev/client", () => ({ shouldUseJev: shouldUseJevMock }));
+vi.mock("./jev/job-scoring", () => ({ scoreJobWithJev: scoreJobWithJevMock }));
+
+
 import { parseJsonFromContent } from "./scorer";
 
 describe("parseJsonFromContent", () => {
@@ -1149,5 +1158,76 @@ describe("salary penalty", () => {
         ScoringUnavailableError,
       );
     });
+  });
+});
+
+describe("Jev scoring engine", () => {
+  beforeEach(() => {
+    getSettingMock.mockResolvedValue(null);
+    getEffectiveSettingsMock.mockResolvedValue({
+      penalizeMissingSalary: { value: false, default: false, override: null },
+      missingSalaryPenalty: { value: 10, default: 10, override: null },
+      jevBriefCutoff: { value: 40, default: 40, override: null },
+      scoringInstructions: { value: "", default: "", override: null },
+      scoringPromptTemplate: { value: "", default: "", override: null },
+    } as any);
+    resolveLlmModelMock.mockResolvedValue("model");
+    callJsonMock.mockResolvedValue({
+      success: true,
+      data: {
+        score: 77,
+        reason: "LLM reason",
+        jobBrief: {
+          role_summary: "Does things",
+          they_want: [],
+          specifics: [],
+          company_offers: [],
+          practical_details: [],
+          missing_or_unclear: [],
+          repeated_signals: [],
+        },
+        jobPatches: [],
+        jobWarnings: [],
+      },
+    });
+    createConfiguredLlmServiceMock.mockResolvedValue({ callJson: callJsonMock });
+    shouldUseJevMock.mockResolvedValue(true);
+  });
+
+  afterEach(() => vi.clearAllMocks());
+
+  const job = () => createJob({ id: "jev-job", jobDescription: "Build things" });
+
+  it("skips the LLM entirely below the brief cutoff", async () => {
+    scoreJobWithJevMock.mockResolvedValue({ score: 25, reason: "jev low", parts: {} });
+    const { scoreJobSuitability } = await import("./scorer");
+    const result = await scoreJobSuitability(job(), {});
+    expect(result).toMatchObject({ score: 25, reason: "jev low", jobBrief: null });
+    expect(callJsonMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Jev score but uses the LLM for the brief at or above the cutoff", async () => {
+    scoreJobWithJevMock.mockResolvedValue({ score: 40, reason: "jev ok", parts: {} });
+    const { scoreJobSuitability } = await import("./scorer");
+    const result = await scoreJobSuitability(job(), {});
+    expect(callJsonMock).toHaveBeenCalledTimes(1);
+    expect(result.score).toBe(40);
+    expect(result.reason).toBe("jev ok");
+    expect(result.jobBrief).toContain("Does things");
+  });
+
+  it("falls back to the LLM score when Jev fails", async () => {
+    scoreJobWithJevMock.mockRejectedValue(new Error("down"));
+    const { scoreJobSuitability } = await import("./scorer");
+    const result = await scoreJobSuitability(job(), {});
+    expect(result.score).toBe(77);
+    expect(result.reason).toBe("LLM reason");
+  });
+
+  it("generateJobBrief never calls Jev and returns only the brief", async () => {
+    const { generateJobBrief } = await import("./scorer");
+    const result = await generateJobBrief(job(), {});
+    expect(scoreJobWithJevMock).not.toHaveBeenCalled();
+    expect(result.jobBrief).toContain("Does things");
   });
 });

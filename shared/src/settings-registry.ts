@@ -474,6 +474,24 @@ export const settingsRegistry = {
     serialize: (value: JudgmentEngine | null | undefined): string | null =>
       value ?? null,
   },
+  scoringEngine: {
+    kind: "typed" as const,
+    schema: z.enum(JUDGMENT_ENGINE_VALUES),
+    default: (): JudgmentEngine => "llm",
+    parse: parseJudgmentEngineOrNull,
+    serialize: (value: JudgmentEngine | null | undefined): string | null =>
+      value ?? null,
+  },
+  jevBriefCutoff: {
+    kind: "typed" as const,
+    schema: z.number().int().min(0).max(100),
+    default: (): number => 40,
+    parse: (raw: string | undefined): number | null => {
+      const parsed = raw ? parseInt(raw, 10) : NaN;
+      return Number.isNaN(parsed) ? null : Math.min(100, Math.max(0, parsed));
+    },
+    serialize: serializeNullableNumber,
+  },
   pdfPaperSize: {
     kind: "typed" as const,
     schema: z.enum(PDF_PAPER_SIZE_VALUES),

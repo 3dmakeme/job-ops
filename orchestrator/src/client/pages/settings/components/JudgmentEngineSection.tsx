@@ -4,6 +4,7 @@ import type { UpdateSettingsInput } from "@shared/settings-schema.js";
 import { JUDGMENT_ENGINE_LABELS, JUDGMENT_ENGINE_VALUES } from "@shared/types.js";
 import type React from "react";
 import { Controller, useFormContext } from "react-hook-form";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -19,7 +20,10 @@ type JudgmentEngineSectionProps = {
   layoutMode?: "accordion" | "panel";
 };
 
-type EngineFieldName = "projectSelectionEngine" | "emailRoutingEngine";
+type EngineFieldName =
+  | "projectSelectionEngine"
+  | "emailRoutingEngine"
+  | "scoringEngine";
 
 const FIELDS: Array<{
   name: EngineFieldName;
@@ -33,12 +37,46 @@ const FIELDS: Array<{
       "Picks which resume projects fit a job. Jev scores each project against the job description and your code fills the slots; the LLM option asks the model to choose.",
   },
   {
+    name: "scoringEngine",
+    label: "Job scoring",
+    description:
+      "Jev scores every job against your resume in about 200 ms. The LLM then only writes the job brief and checks job facts for jobs at or above the brief cutoff; lower-scoring jobs get their brief the first time you open them.",
+  },
+  {
     name: "emailRoutingEngine",
     label: "Email routing",
     description:
       "Classifies post-application emails and matches them to a job. Jev answers relevance, stage and job separately with calibrated confidence; auto-linking needs all three to be confident.",
   },
 ];
+
+export const JevBriefCutoffInput: React.FC<{
+  values: JudgmentEngineValues;
+  disabled: boolean;
+}> = ({ values, disabled }) => {
+  const { register } = useFormContext<UpdateSettingsInput>();
+  return (
+    <div className="space-y-2">
+      <label htmlFor="jevBriefCutoff" className="text-sm font-medium">
+        Brief cutoff (Jev score)
+      </label>
+      <Input
+        id="jevBriefCutoff"
+        type="number"
+        min={0}
+        max={100}
+        step={1}
+        disabled={disabled}
+        {...register("jevBriefCutoff", { valueAsNumber: true })}
+      />
+      <p className="text-xs text-muted-foreground">
+        Jobs scoring below this skip the LLM brief until opened. Effective:{" "}
+        {values.jevBriefCutoff.effective} · Default:{" "}
+        {values.jevBriefCutoff.default}
+      </p>
+    </div>
+  );
+};
 
 export const JudgmentEngineSelect: React.FC<{
   name: EngineFieldName;
@@ -139,6 +177,12 @@ export const JudgmentEngineSection: React.FC<JudgmentEngineSectionProps> = ({
               Effective: {JUDGMENT_ENGINE_LABELS[values[field.name].effective]} ·
               Default: {JUDGMENT_ENGINE_LABELS[values[field.name].default]}
             </div>
+            {field.name === "scoringEngine" ? (
+              <JevBriefCutoffInput
+                values={values}
+                disabled={isLoading || isSaving}
+              />
+            ) : null}
           </div>
         ))}
       </div>
