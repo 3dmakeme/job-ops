@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => {
   };
   return {
     instance,
-    ImapFlow: vi.fn(function ImapFlow() {
+    ImapFlow: vi.fn(function ImapFlow(_options: unknown) {
       return instance;
     }),
   };

@@ -10,8 +10,8 @@ import {
 } from "./imap-client";
 import {
   type IngestItem,
-  type IngestMessage,
   type IngestionSyncSummary,
+  type IngestMessage,
   runPostApplicationIngestion,
 } from "./message-ingest";
 
