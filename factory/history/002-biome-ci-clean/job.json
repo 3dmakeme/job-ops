@@ -1,0 +1,41 @@
+{
+ "id": "002-biome-ci-clean",
+ "title": "Repo-wide biome clean",
+ "feature": "Make `biome ci .` pass repo-wide: fix the 23 existing errors on main (formatting/lint only, no behaviour changes), including factory/dashboard.html and factory/settings.json, and exclude generated or vendored files in biome.json if they are the cause",
+ "branch": "factory/002-biome-ci-clean",
+ "base": "main",
+ "worktree": "/Users/richards/Code/job-ops-factory/002-biome-ci-clean",
+ "reviewers": [
+  {
+   "name": "security",
+   "agent": "fm-factory:reviewer-security",
+   "skills": [
+    "fm-factory:secure-endpoint"
+   ]
+  },
+  {
+   "name": "ux",
+   "agent": "fm-factory:reviewer-ux",
+   "browser": true
+  },
+  {
+   "name": "ui",
+   "agent": "fm-factory:reviewer-ui",
+   "browser": true
+  },
+  {
+   "name": "code",
+   "agent": "fm-factory:reviewer-code"
+  }
+ ],
+ "models": {},
+ "stage": "merged",
+ "round": 1,
+ "reviews": {
+  "security": "PASS",
+  "ux": "PASS",
+  "ui": "PASS",
+  "code": "PASS"
+ },
+ "merged": "2026-11-02"
+}
