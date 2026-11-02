@@ -333,7 +333,7 @@ export async function getMessageFull(
   };
 }
 
-function cleanEmailHtmlForLlm(htmlContent: string): string {
+export function cleanEmailHtmlForLlm(htmlContent: string): string {
   return convert(htmlContent, {
     wordwrap: 130,
     selectors: [

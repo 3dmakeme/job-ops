@@ -64,6 +64,7 @@ Use consistent status/code mapping:
 - Webhooks: send minimal whitelisted payloads by default.
 - LLM prompts: send only required profile/job fields; avoid unnecessary PII.
 - Document external payload behavior when adding new integrations.
+- IMAP credentials are stored AES-256-GCM encrypted through `infra/credential-crypto.ts` (key from `CREDENTIALS_ENCRYPTION_KEY` or `DATA_DIR/credentials-key`). New stored integration secrets must use that helper.
 
 ## PR Checklist (Routes/Services)
 

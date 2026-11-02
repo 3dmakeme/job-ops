@@ -209,7 +209,7 @@ describe("post-application provider action dispatcher", () => {
     });
   });
 
-  it("maps IMAP not-implemented errors to service unavailable app errors", async () => {
+  it("returns invalid request when imap connect payload is missing", async () => {
     await expect(
       executePostApplicationProviderAction({
         provider: "imap",
@@ -217,11 +217,26 @@ describe("post-application provider action dispatcher", () => {
         accountKey: "account:imap:test",
       }),
     ).rejects.toMatchObject({
-      status: 503,
-      code: "SERVICE_UNAVAILABLE",
-      message:
-        "IMAP provider is not implemented yet for account 'account:imap:test'.",
+      status: 400,
+      code: "INVALID_REQUEST",
+      message: "IMAP connect requires connection settings in body.payload.",
     });
+  });
+
+  it("dispatches status action to imap provider", async () => {
+    const response = await executePostApplicationProviderAction({
+      provider: "imap",
+      action: "status",
+      accountKey: "account:imap:test",
+    });
+
+    expect(response.status).toEqual({
+      provider: "imap",
+      accountKey: "account:imap:test",
+      connected: false,
+      integration: null,
+    });
+    expect(response.message).toBe("IMAP provider is not connected.");
   });
 
   it("maps upstream provider errors to upstream app errors", () => {

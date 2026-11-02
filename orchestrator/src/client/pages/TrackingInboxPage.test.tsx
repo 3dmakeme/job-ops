@@ -1,6 +1,15 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { toast } from "sonner";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import * as api from "../api";
 import { renderWithQueryClient } from "../test/renderWithQueryClient";
 import { TrackingInboxPage } from "./TrackingInboxPage";
@@ -20,6 +29,15 @@ vi.mock("../api", () => ({
   postApplicationGmailOauthExchange: vi.fn(),
   postApplicationProviderSync: vi.fn(),
   postApplicationProviderDisconnect: vi.fn(),
+  postApplicationProviderConnect: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+    loading: vi.fn(),
+  },
 }));
 
 function makeInboxItem() {
@@ -246,5 +264,307 @@ describe("TrackingInboxPage", () => {
         view: "list",
       });
     });
+  });
+});
+
+function mockImapStatus(input: {
+  connected: boolean;
+  credentials?: Record<string, unknown> | null;
+}) {
+  const gmailStatus = vi.mocked(api.postApplicationProviderStatus);
+  const defaultImplementation = gmailStatus.getMockImplementation();
+  gmailStatus.mockImplementation(async (args) => {
+    if (args?.provider !== "imap") {
+      return defaultImplementation
+        ? defaultImplementation(args)
+        : Promise.reject(new Error("missing status mock"));
+    }
+    return {
+      provider: "imap",
+      action: "status",
+      accountKey: "default",
+      status: {
+        provider: "imap",
+        accountKey: "default",
+        connected: input.connected,
+        integration: input.connected
+          ? {
+              id: "int-imap",
+              provider: "imap",
+              accountKey: "default",
+              displayName: "candidate@example.com",
+              status: "connected",
+              credentials: input.credentials ?? null,
+              lastConnectedAt: null,
+              lastSyncedAt: null,
+              lastError: null,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            }
+          : null,
+      },
+    };
+  });
+}
+
+async function selectImapProvider() {
+  render(
+    <MemoryRouter>
+      <TrackingInboxPage />
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole("combobox", { name: "Provider" }));
+  fireEvent.click(await screen.findByRole("option", { name: "imap" }));
+  return screen.findByLabelText("Host");
+}
+
+function fillImapForm(values: {
+  host?: string;
+  port?: string;
+  username?: string;
+  password?: string;
+}) {
+  if (values.host !== undefined) {
+    fireEvent.change(screen.getByLabelText("Host"), {
+      target: { value: values.host },
+    });
+  }
+  if (values.port !== undefined) {
+    fireEvent.change(screen.getByLabelText("Port"), {
+      target: { value: values.port },
+    });
+  }
+  if (values.username !== undefined) {
+    fireEvent.change(screen.getByLabelText("Username"), {
+      target: { value: values.username },
+    });
+  }
+  if (values.password !== undefined) {
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: values.password },
+    });
+  }
+}
+
+describe("TrackingInboxPage IMAP connect form", () => {
+  const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+
+  beforeAll(() => {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+  });
+
+  afterAll(() => {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: originalScrollIntoView,
+    });
+  });
+
+  beforeEach(() => {
+    mockImapStatus({ connected: false });
+  });
+
+  it("shows the five labelled IMAP fields when imap is selected", async () => {
+    await selectImapProvider();
+
+    expect(screen.getByLabelText("Host")).toHaveAttribute(
+      "placeholder",
+      "mail.example.com",
+    );
+    expect(screen.getByLabelText("Port")).toHaveValue(993);
+    expect(screen.getByLabelText("Use TLS")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByLabelText("Username")).toHaveAttribute(
+      "autocomplete",
+      "username",
+    );
+    expect(screen.getByLabelText("Password")).toHaveAttribute(
+      "type",
+      "password",
+    );
+    expect(
+      screen.queryByText(/Gmail connect uses Google OAuth popup/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("submits the typed payload and clears the password after success", async () => {
+    vi.mocked(api.postApplicationProviderConnect).mockResolvedValue({
+      provider: "imap",
+      action: "connect",
+      accountKey: "default",
+      status: {
+        provider: "imap",
+        accountKey: "default",
+        connected: true,
+        integration: null,
+      },
+    });
+    await selectImapProvider();
+
+    fillImapForm({
+      host: "mail.example.com",
+      port: "143",
+      username: "candidate@example.com",
+      password: "imap-password",
+    });
+    fireEvent.click(screen.getByLabelText("Use TLS"));
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    await waitFor(() => {
+      expect(api.postApplicationProviderConnect).toHaveBeenCalledWith({
+        provider: "imap",
+        accountKey: "default",
+        payload: {
+          host: "mail.example.com",
+          port: 143,
+          tls: false,
+          username: "candidate@example.com",
+          password: "imap-password",
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Provider connected");
+    });
+    expect(screen.getByLabelText("Password")).toHaveValue("");
+    expect(screen.getByLabelText("Host")).toHaveValue("mail.example.com");
+    expect(api.postApplicationGmailOauthStart).not.toHaveBeenCalled();
+  });
+
+  it("blocks submit with an empty password and sends no request", async () => {
+    await selectImapProvider();
+
+    fillImapForm({
+      host: "mail.example.com",
+      username: "candidate@example.com",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        "Host, username and password are required for IMAP.",
+      );
+    });
+    expect(api.postApplicationProviderConnect).not.toHaveBeenCalled();
+  });
+
+  it("blocks submit with an out-of-range port", async () => {
+    await selectImapProvider();
+
+    fillImapForm({
+      host: "mail.example.com",
+      port: "70000",
+      username: "candidate@example.com",
+      password: "imap-password",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        "Port must be a whole number from 1 to 65535.",
+      );
+    });
+    expect(api.postApplicationProviderConnect).not.toHaveBeenCalled();
+  });
+
+  it("keeps host, port and username when connect fails", async () => {
+    vi.mocked(api.postApplicationProviderConnect).mockRejectedValue(
+      new Error("IMAP login failed. Check the username and password."),
+    );
+    await selectImapProvider();
+
+    fillImapForm({
+      host: "mail.example.com",
+      port: "995",
+      username: "candidate@example.com",
+      password: "wrong-password",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        "IMAP login failed. Check the username and password.",
+      );
+    });
+    expect(screen.getByLabelText("Host")).toHaveValue("mail.example.com");
+    expect(screen.getByLabelText("Port")).toHaveValue(995);
+    expect(screen.getByLabelText("Username")).toHaveValue(
+      "candidate@example.com",
+    );
+  });
+
+  it("shows the stored username and host when imap is connected", async () => {
+    mockImapStatus({
+      connected: true,
+      credentials: {
+        host: "mail.example.com",
+        port: 993,
+        tls: true,
+        username: "candidate@example.com",
+        hasPassword: true,
+      },
+    });
+    render(
+      <MemoryRouter>
+        <TrackingInboxPage />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: "Provider" }));
+    fireEvent.click(await screen.findByRole("option", { name: "imap" }));
+
+    expect(
+      await screen.findByText("candidate@example.com @ mail.example.com"),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Host")).not.toBeInTheDocument();
+  });
+
+  it("still uses the Gmail OAuth flow for gmail", async () => {
+    vi.mocked(api.postApplicationProviderStatus).mockResolvedValue({
+      provider: "gmail",
+      action: "status",
+      accountKey: "default",
+      status: {
+        provider: "gmail",
+        accountKey: "default",
+        connected: false,
+        integration: null,
+      },
+    });
+    vi.mocked(api.postApplicationGmailOauthStart).mockResolvedValue({
+      provider: "gmail",
+      accountKey: "default",
+      authorizationUrl: "https://accounts.google.com/o/oauth2/auth",
+      state: "state-1",
+    });
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    render(
+      <MemoryRouter>
+        <TrackingInboxPage />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByText(/Gmail connect uses Google OAuth popup/),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Host")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
+
+    await waitFor(() => {
+      expect(api.postApplicationGmailOauthStart).toHaveBeenCalledWith({
+        accountKey: "default",
+      });
+    });
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://accounts.google.com/o/oauth2/auth",
+      "gmail-oauth-connect",
+      "popup,width=520,height=720",
+    );
+    expect(api.postApplicationProviderConnect).not.toHaveBeenCalled();
+    openSpy.mockRestore();
   });
 });
