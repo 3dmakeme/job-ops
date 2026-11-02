@@ -25,6 +25,7 @@ import { getDataDir } from "../config/dataDir";
 import * as jobsRepo from "../repositories/jobs";
 import * as pipelineRepo from "../repositories/pipeline";
 import * as settingsRepo from "../repositories/settings";
+import { getCurrentDesignResumeOrNullOnLegacy } from "../services/design-resume";
 import {
   refundHostedUsageReservation,
   reserveHostedUsage,
@@ -42,9 +43,8 @@ import {
   extractProjectsFromProfile,
   resolveResumeProjectsSettings,
 } from "../services/resumeProjects";
-import { LlmNotConfiguredError } from "../services/scorer";
-import { getCurrentDesignResumeOrNullOnLegacy } from "../services/design-resume";
 import { extractCompetencyLines } from "../services/rxresume/tailoring";
+import { LlmNotConfiguredError } from "../services/scorer";
 import { generateTailoring } from "../services/summary";
 import {
   type PendingChallenge,

@@ -581,7 +581,10 @@ describe("typst resume renderer", () => {
               title: "Acme, London",
               subtitle: "Head of Data",
               date: "Sept 2023 - Present",
-              bullets: ["Led <strong>platform</strong> delivery", "Scaled team"],
+              bullets: [
+                "Led <strong>platform</strong> delivery",
+                "Scaled team",
+              ],
             },
             {
               title: "Globex",

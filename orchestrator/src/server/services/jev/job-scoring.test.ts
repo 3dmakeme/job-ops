@@ -22,7 +22,12 @@ const profile = {
   sections: {
     experience: {
       items: [
-        { company: "Acme", position: "Head of AI", period: "2023", description: "<p>Built things</p>" },
+        {
+          company: "Acme",
+          position: "Head of AI",
+          period: "2023",
+          description: "<p>Built things</p>",
+        },
         { company: "Hidden", position: "X", hidden: true },
       ],
     },
@@ -35,16 +40,25 @@ describe("buildCandidateState", () => {
     const state = buildCandidateState(profile);
     expect(state.summary).toBe("Leads AI teams");
     expect(state.experience).toHaveLength(1);
-    expect(state.experience[0]).toMatchObject({ company: "Acme", role: "Head of AI" });
+    expect(state.experience[0]).toMatchObject({
+      company: "Acme",
+      role: "Head of AI",
+    });
     expect(state.skills[0]).toContain("LLM, Snowflake");
   });
 });
 
 describe("combineScores / buildReason", () => {
   it("weights the four dimensions to a 0..100 integer", () => {
-    expect(combineScores({ domain: 1, level: 1, skills: 1, overall: 1 })).toBe(100);
-    expect(combineScores({ domain: 0, level: 0, skills: 0, overall: 0 })).toBe(0);
-    expect(combineScores({ domain: 1, level: 0, skills: 0, overall: 0 })).toBe(30);
+    expect(combineScores({ domain: 1, level: 1, skills: 1, overall: 1 })).toBe(
+      100,
+    );
+    expect(combineScores({ domain: 0, level: 0, skills: 0, overall: 0 })).toBe(
+      0,
+    );
+    expect(combineScores({ domain: 1, level: 0, skills: 0, overall: 0 })).toBe(
+      30,
+    );
   });
 
   it("assembles the reason from the dimension levels", () => {
@@ -73,14 +87,19 @@ describe("scoreJobWithJev", () => {
     expect(result.score).toBe(100);
     expect(systemOne).toHaveBeenCalledTimes(1);
     const request = systemOne.mock.calls[0][0];
-    expect(Object.keys(request.questions).sort()).toEqual(["domain", "level", "overall", "skills"]);
+    expect(Object.keys(request.questions).sort()).toEqual([
+      "domain",
+      "level",
+      "overall",
+      "skills",
+    ]);
     expect(request.state.job.description).toBe("Lead AI");
   });
 
   it("refuses a job with no description instead of guessing", async () => {
-    await expect(scoreJobWithJev({ title: "t", jobDescription: " " }, profile)).rejects.toThrow(
-      /no description/,
-    );
+    await expect(
+      scoreJobWithJev({ title: "t", jobDescription: " " }, profile),
+    ).rejects.toThrow(/no description/);
     expect(systemOne).not.toHaveBeenCalled();
   });
 });

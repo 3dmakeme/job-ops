@@ -289,7 +289,9 @@ export function extractCompetencyLines(resumeData: RecordLike): string[] {
   if (!section) return [];
   return (asArray(section.items) ?? [])
     .map((raw) => asRecord(raw))
-    .filter((item): item is RecordLike => Boolean(item) && item?.hidden !== true)
+    .filter(
+      (item): item is RecordLike => Boolean(item) && item?.hidden !== true,
+    )
     .map(competencyItemToLine)
     .filter(Boolean);
 }
@@ -341,8 +343,10 @@ export function applyTailoredCompetencies(
     if ("title" in template || "name" in template) {
       const key = "title" in template ? "title" : "name";
       next[key] = head;
-      if ("description" in template) next.description = tail ? `<p>${tail}</p>` : "";
-      else if ("content" in template) next.content = tail ? `<p>${tail}</p>` : "";
+      if ("description" in template)
+        next.description = tail ? `<p>${tail}</p>` : "";
+      else if ("content" in template)
+        next.content = tail ? `<p>${tail}</p>` : "";
     } else if ("content" in template) {
       next.content = `<p>${line}</p>`;
     }
@@ -355,10 +359,7 @@ export function applyTailoredChunks(args: {
   tailoredContent: TailorChunkInput;
 }): void {
   applyTailoredSkills(args.resumeData, args.tailoredContent.skills);
-  applyTailoredCompetencies(
-    args.resumeData,
-    args.tailoredContent.competencies,
-  );
+  applyTailoredCompetencies(args.resumeData, args.tailoredContent.competencies);
   applyTailoredSummary(args.resumeData, args.tailoredContent.summary);
   applyTailoredHeadline(args.resumeData, args.tailoredContent.headline);
 }

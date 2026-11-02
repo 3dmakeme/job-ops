@@ -28,7 +28,11 @@ const project = (id: string): ResumeProjectSelectionItem => ({
   summaryText: "",
 });
 const eligibleProjects = [project("a"), project("b"), project("c")];
-const args = { jobDescription: "TypeScript", eligibleProjects, desiredCount: 2 };
+const args = {
+  jobDescription: "TypeScript",
+  eligibleProjects,
+  desiredCount: 2,
+};
 
 describe("pickProjectIdsForJob engine toggle", () => {
   beforeEach(() => {
