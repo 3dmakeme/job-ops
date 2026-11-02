@@ -2,7 +2,6 @@ import {
   getPostApplicationIntegration,
   upsertConnectedPostApplicationIntegration,
 } from "@server/repositories/post-application-integrations";
-import type { GmailCredentials } from "./gmail-api";
 import {
   buildEmailText,
   extractBodyText,
@@ -11,6 +10,10 @@ import {
   listMessageIds,
   resolveGmailAccessToken,
 } from "./gmail-api";
+import {
+  decodeStoredGmailCredentials,
+  encodeStoredGmailCredentials,
+} from "./gmail-credentials";
 import {
   type IngestionSyncSummary,
   runPostApplicationIngestion,
@@ -25,36 +28,6 @@ export const __test__ = {
   extractBodyText,
   buildEmailText,
 };
-
-function asString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function parseGmailCredentials(
-  credentials: Record<string, unknown> | null,
-): GmailCredentials | null {
-  if (!credentials) return null;
-  const refreshToken = asString(credentials.refreshToken);
-  if (!refreshToken) return null;
-
-  const accessToken = asString(credentials.accessToken) ?? undefined;
-  const expiryDate =
-    typeof credentials.expiryDate === "number" &&
-    Number.isFinite(credentials.expiryDate)
-      ? credentials.expiryDate
-      : undefined;
-
-  return {
-    refreshToken,
-    accessToken,
-    expiryDate,
-    scope: asString(credentials.scope) ?? undefined,
-    tokenType: asString(credentials.tokenType) ?? undefined,
-    email: asString(credentials.email) ?? undefined,
-  };
-}
 
 function headerValue(
   headers: Array<{ name?: string; value?: string }>,
@@ -75,7 +48,7 @@ export async function runGmailIngestionSync(args: {
     "gmail",
     args.accountKey,
   );
-  const parsedCredentials = parseGmailCredentials(
+  const parsedCredentials = await decodeStoredGmailCredentials(
     integration?.credentials ?? null,
   );
   if (!integration || !parsedCredentials) {
@@ -106,14 +79,7 @@ export async function runGmailIngestionSync(args: {
           provider: "gmail",
           accountKey: args.accountKey,
           displayName: integration.displayName,
-          credentials: {
-            refreshToken: resolvedCredentials.refreshToken,
-            accessToken: resolvedCredentials.accessToken,
-            expiryDate: resolvedCredentials.expiryDate,
-            scope: resolvedCredentials.scope,
-            tokenType: resolvedCredentials.tokenType,
-            email: resolvedCredentials.email,
-          },
+          credentials: await encodeStoredGmailCredentials(resolvedCredentials),
         });
       }
 
