@@ -1,9 +1,9 @@
 import { LlmModelConfiguration } from "@client/components/llmmodelconfiguration/LlmModelConfiguration";
-import { SettingsSectionFrame } from "@client/pages/settings/components/SettingsSectionFrame";
 import {
   JevBriefCutoffInput,
   JudgmentEngineSelect,
 } from "@client/pages/settings/components/JudgmentEngineSection";
+import { SettingsSectionFrame } from "@client/pages/settings/components/SettingsSectionFrame";
 import type {
   JudgmentEngineValues,
   ModelValues,

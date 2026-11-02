@@ -44,7 +44,6 @@ const { shouldUseJevMock, scoreJobWithJevMock } = vi.hoisted(() => ({
 vi.mock("./jev/client", () => ({ shouldUseJev: shouldUseJevMock }));
 vi.mock("./jev/job-scoring", () => ({ scoreJobWithJev: scoreJobWithJevMock }));
 
-
 import { parseJsonFromContent } from "./scorer";
 
 describe("parseJsonFromContent", () => {
@@ -1190,24 +1189,39 @@ describe("Jev scoring engine", () => {
         jobWarnings: [],
       },
     });
-    createConfiguredLlmServiceMock.mockResolvedValue({ callJson: callJsonMock });
+    createConfiguredLlmServiceMock.mockResolvedValue({
+      callJson: callJsonMock,
+    });
     shouldUseJevMock.mockResolvedValue(true);
   });
 
   afterEach(() => vi.clearAllMocks());
 
-  const job = () => createJob({ id: "jev-job", jobDescription: "Build things" });
+  const job = () =>
+    createJob({ id: "jev-job", jobDescription: "Build things" });
 
   it("skips the LLM entirely below the brief cutoff", async () => {
-    scoreJobWithJevMock.mockResolvedValue({ score: 25, reason: "jev low", parts: {} });
+    scoreJobWithJevMock.mockResolvedValue({
+      score: 25,
+      reason: "jev low",
+      parts: {},
+    });
     const { scoreJobSuitability } = await import("./scorer");
     const result = await scoreJobSuitability(job(), {});
-    expect(result).toMatchObject({ score: 25, reason: "jev low", jobBrief: null });
+    expect(result).toMatchObject({
+      score: 25,
+      reason: "jev low",
+      jobBrief: null,
+    });
     expect(callJsonMock).not.toHaveBeenCalled();
   });
 
   it("keeps the Jev score but uses the LLM for the brief at or above the cutoff", async () => {
-    scoreJobWithJevMock.mockResolvedValue({ score: 40, reason: "jev ok", parts: {} });
+    scoreJobWithJevMock.mockResolvedValue({
+      score: 40,
+      reason: "jev ok",
+      parts: {},
+    });
     const { scoreJobSuitability } = await import("./scorer");
     const result = await scoreJobSuitability(job(), {});
     expect(callJsonMock).toHaveBeenCalledTimes(1);

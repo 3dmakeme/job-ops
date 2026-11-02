@@ -24,10 +24,10 @@ import { ChatSettingsSection } from "@client/pages/settings/components/ChatSetti
 import { DangerZoneSection } from "@client/pages/settings/components/DangerZoneSection";
 import { DisplaySettingsSection } from "@client/pages/settings/components/DisplaySettingsSection";
 import { EnvironmentSettingsSection } from "@client/pages/settings/components/EnvironmentSettingsSection";
+import { JudgmentEngineSection } from "@client/pages/settings/components/JudgmentEngineSection";
 import { ModelSettingsSection } from "@client/pages/settings/components/ModelSettingsSection";
 import { PromptTemplatesSection } from "@client/pages/settings/components/PromptTemplatesSection";
 import { ReactiveResumeSection } from "@client/pages/settings/components/ReactiveResumeSection";
-import { JudgmentEngineSection } from "@client/pages/settings/components/JudgmentEngineSection";
 import { ScoringSettingsSection } from "@client/pages/settings/components/ScoringSettingsSection";
 import { TracerLinksSettingsSection } from "@client/pages/settings/components/TracerLinksSettingsSection";
 import { WebhooksSection } from "@client/pages/settings/components/WebhooksSection";

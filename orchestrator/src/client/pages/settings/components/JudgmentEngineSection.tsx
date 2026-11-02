@@ -1,7 +1,10 @@
 import { SettingsSectionFrame } from "@client/pages/settings/components/SettingsSectionFrame";
 import type { JudgmentEngineValues } from "@client/pages/settings/types";
 import type { UpdateSettingsInput } from "@shared/settings-schema.js";
-import { JUDGMENT_ENGINE_LABELS, JUDGMENT_ENGINE_VALUES } from "@shared/types.js";
+import {
+  JUDGMENT_ENGINE_LABELS,
+  JUDGMENT_ENGINE_VALUES,
+} from "@shared/types.js";
 import type React from "react";
 import { Controller, useFormContext } from "react-hook-form";
 import { Input } from "@/components/ui/input";
@@ -170,12 +173,10 @@ export const JudgmentEngineSection: React.FC<JudgmentEngineSectionProps> = ({
                 </Select>
               )}
             />
-            <p className="text-xs text-muted-foreground">
-              {field.description}
-            </p>
+            <p className="text-xs text-muted-foreground">{field.description}</p>
             <div className="text-xs text-muted-foreground">
-              Effective: {JUDGMENT_ENGINE_LABELS[values[field.name].effective]} ·
-              Default: {JUDGMENT_ENGINE_LABELS[values[field.name].default]}
+              Effective: {JUDGMENT_ENGINE_LABELS[values[field.name].effective]}{" "}
+              · Default: {JUDGMENT_ENGINE_LABELS[values[field.name].default]}
             </div>
             {field.name === "scoringEngine" ? (
               <JevBriefCutoffInput

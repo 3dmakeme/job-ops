@@ -7,6 +7,8 @@ import { getDefaultPromptTemplate } from "@shared/prompt-template-definitions.js
 import type { Job, JobBrief, UpdateJobInput } from "@shared/types";
 import { stripHtmlTags } from "@shared/utils/string";
 import { withHostedUsageReservation } from "./hosted-usage";
+import { shouldUseJev } from "./jev/client";
+import { scoreJobWithJev } from "./jev/job-scoring";
 import {
   type JobFactPatch,
   PATCHABLE_JOB_FIELDS,
@@ -15,8 +17,6 @@ import {
 import { isConfigurationFailure } from "./llm/policies/configuration-error";
 import type { JsonSchemaDefinition } from "./llm/types";
 import { stripMarkdownCodeFences } from "./llm/utils/json";
-import { shouldUseJev } from "./jev/client";
-import { scoreJobWithJev } from "./jev/job-scoring";
 import { createConfiguredLlmService, resolveLlmModel } from "./modelSelection";
 import { renderPromptTemplate } from "./prompt-templates";
 import { filterProfileProjectsForAi } from "./resumeProjects";

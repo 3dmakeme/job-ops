@@ -30,11 +30,11 @@ import {
 } from "../tailoring-utils";
 import { TailoringSections } from "./TailoringSections";
 import {
+  competenciesToJson,
+  competenciesToText,
   getTailoringSavePayloadKey,
   type TailoringSavePayload,
   useTailoringDraft,
-  competenciesToJson,
-  competenciesToText,
 } from "./useTailoringDraft";
 
 interface TailoringWorkspaceBaseProps {

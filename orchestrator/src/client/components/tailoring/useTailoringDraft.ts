@@ -24,12 +24,16 @@ const hasSelectionDiff = (current: Set<string>, saved: Set<string>) => {
 };
 
 /** Core competencies are edited as one "Title — description" line each. */
-export const competenciesToText = (value: string | null | undefined): string => {
+export const competenciesToText = (
+  value: string | null | undefined,
+): string => {
   if (!value) return "";
   try {
     const parsed: unknown = JSON.parse(value);
     return Array.isArray(parsed)
-      ? parsed.filter((line): line is string => typeof line === "string").join("\n")
+      ? parsed
+          .filter((line): line is string => typeof line === "string")
+          .join("\n")
       : "";
   } catch {
     return "";

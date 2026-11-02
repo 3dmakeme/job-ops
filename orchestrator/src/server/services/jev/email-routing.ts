@@ -105,7 +105,11 @@ export function mapEmailAnswers(
     jobTrust,
     stageTarget === "no_change" ? 1 : stageTrust,
   );
-  const confidence = matchedJob ? pct(linkTrust) : isRelevant ? pct(relevance) : 0;
+  const confidence = matchedJob
+    ? pct(linkTrust)
+    : isRelevant
+      ? pct(relevance)
+      : 0;
 
   const reason = [
     `Jev: relevant ${relevance.toFixed(2)}`,

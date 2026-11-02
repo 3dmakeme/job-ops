@@ -3,15 +3,15 @@ import { fail, ok } from "@infra/http";
 import { logger } from "@infra/logger";
 import { setupSse, startSseHeartbeat, writeSseData } from "@infra/sse";
 import { resolveRequestOrigin } from "@server/infra/request-origin";
+import * as jobsRepo from "@server/repositories/jobs";
 import {
   buildJobActionExecutionOptions,
   executeJobActionForJob,
   mapJobActionFailure,
 } from "@server/services/jobs/actions";
-import * as jobsRepo from "@server/repositories/jobs";
+import { resolvePdfFingerprintContext } from "@server/services/pdf-fingerprint";
 import { getProfile } from "@server/services/profile";
 import { generateJobBrief } from "@server/services/scorer";
-import { resolvePdfFingerprintContext } from "@server/services/pdf-fingerprint";
 import { asyncPool } from "@server/utils/async-pool";
 import type { JobActionResult, JobActionStreamEvent } from "@shared/types";
 import { type Request, type Response, Router } from "express";
@@ -327,7 +327,12 @@ const briefInFlight = new Map<string, Promise<unknown>>();
 jobsActionsRouter.post("/:id/brief", async (req: Request, res: Response) => {
   try {
     const job = await jobsRepo.getJobById(req.params.id);
-    if (!job) throw new AppError({ status: 404, code: "NOT_FOUND", message: "Job not found" });
+    if (!job)
+      throw new AppError({
+        status: 404,
+        code: "NOT_FOUND",
+        message: "Job not found",
+      });
 
     if (!job.jobBrief && job.jobDescription?.trim()) {
       const existing = briefInFlight.get(job.id);
@@ -336,7 +341,11 @@ jobsActionsRouter.post("/:id/brief", async (req: Request, res: Response) => {
       } else {
         const run = (async () => {
           const profile = await getProfile();
-          if (!profile || typeof profile !== "object" || Array.isArray(profile)) {
+          if (
+            !profile ||
+            typeof profile !== "object" ||
+            Array.isArray(profile)
+          ) {
             throw badRequest("Invalid resume profile format");
           }
           const { jobBrief, jobUpdates } = await generateJobBrief(
@@ -357,7 +366,12 @@ jobsActionsRouter.post("/:id/brief", async (req: Request, res: Response) => {
     }
 
     const updated = await jobsRepo.getJobById(job.id);
-    if (!updated) throw new AppError({ status: 404, code: "NOT_FOUND", message: "Job not found" });
+    if (!updated)
+      throw new AppError({
+        status: 404,
+        code: "NOT_FOUND",
+        message: "Job not found",
+      });
     ok(res, await hydrateJobPdfFreshness(updated));
   } catch (error) {
     fail(
@@ -367,7 +381,10 @@ jobsActionsRouter.post("/:id/brief", async (req: Request, res: Response) => {
         : new AppError({
             status: 500,
             code: "INTERNAL_ERROR",
-            message: error instanceof Error ? error.message : "Failed to generate brief",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Failed to generate brief",
           }),
     );
   }

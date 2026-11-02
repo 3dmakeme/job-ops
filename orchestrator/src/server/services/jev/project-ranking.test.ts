@@ -29,7 +29,10 @@ describe("expectedLevel", () => {
       expectedLevel({ score: 0, probabilities: { 0: 1, 1: 0, 2: 0, 3: 0 } }, 4),
     ).toBe(0);
     expect(
-      expectedLevel({ score: 1, probabilities: { 0: 0.5, 1: 0, 2: 0, 3: 0.5 } }, 4),
+      expectedLevel(
+        { score: 1, probabilities: { 0: 0.5, 1: 0, 2: 0, 3: 0.5 } },
+        4,
+      ),
     ).toBeCloseTo(0.5);
   });
 

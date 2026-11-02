@@ -56,9 +56,24 @@ const LEVELS: Record<Dimension, readonly string[]> = {
 };
 
 const SHORT_LABELS: Record<Dimension, readonly string[]> = {
-  domain: ["different field", "adjacent field", "strong overlap", "direct match"],
-  level: ["well below level", "below or lateral", "right level", "right level or above"],
-  skills: ["few skills match", "some skills match", "most skills match", "nearly all skills match"],
+  domain: [
+    "different field",
+    "adjacent field",
+    "strong overlap",
+    "direct match",
+  ],
+  level: [
+    "well below level",
+    "below or lateral",
+    "right level",
+    "right level or above",
+  ],
+  skills: [
+    "few skills match",
+    "some skills match",
+    "most skills match",
+    "nearly all skills match",
+  ],
   overall: ["poor fit", "weak fit", "good fit", "excellent fit"],
 };
 
@@ -109,7 +124,10 @@ export function buildCandidateState(profile: ProfileRecord) {
         const keywords = Array.isArray(item.keywords)
           ? item.keywords.filter((k) => typeof k === "string").join(", ")
           : "";
-        return text(`${item.name ?? ""}: ${keywords} ${item.description ?? ""}`, 300);
+        return text(
+          `${item.name ?? ""}: ${keywords} ${item.description ?? ""}`,
+          300,
+        );
       })
       .filter(Boolean),
   };
@@ -126,7 +144,9 @@ export function combineScores(parts: Record<Dimension, number>): number {
 export function buildReason(parts: Record<Dimension, number>): string {
   const label = (key: Dimension) => {
     const levels = SHORT_LABELS[key];
-    return levels[Math.min(levels.length - 1, Math.round(parts[key] * (levels.length - 1)))];
+    return levels[
+      Math.min(levels.length - 1, Math.round(parts[key] * (levels.length - 1)))
+    ];
   };
   return `TypeSafe Jev: ${label("domain")}, ${label("level")}, ${label("skills")}; overall ${label("overall")}.`;
 }

@@ -21,7 +21,9 @@ const choiceAnswer = (choice: string, p: number) => ({
   probabilities: { [choice]: p },
 });
 
-const answers = (over: Partial<EmailRoutingAnswers> = {}): EmailRoutingAnswers => ({
+const answers = (
+  over: Partial<EmailRoutingAnswers> = {},
+): EmailRoutingAnswers => ({
   relevant: { noul: 0.99 },
   stage: choiceAnswer("recruiter_screen", 0.97),
   job: choiceAnswer("job_2", 0.98),
@@ -99,8 +101,14 @@ describe("classifyEmailWithJev", () => {
 
     expect(systemOne).toHaveBeenCalledTimes(1);
     const request = systemOne.mock.calls[0][0];
-    expect(request.state).toEqual({ email: "Hi, we'd like to schedule a call" });
-    expect(Object.keys(request.questions)).toEqual(["relevant", "stage", "job"]);
+    expect(request.state).toEqual({
+      email: "Hi, we'd like to schedule a call",
+    });
+    expect(Object.keys(request.questions)).toEqual([
+      "relevant",
+      "stage",
+      "job",
+    ]);
     expect(Object.keys(request.questions.job.criteria)).toEqual([
       "none",
       "job_1",

@@ -30,7 +30,9 @@ export const JobBriefPane: React.FC<JobBriefPaneProps> = ({
   const briefMutation = useGenerateJobBriefMutation();
   const requestedFor = useRef<string | null>(null);
   const needsBrief =
-    !brief && job.suitabilityScore != null && Boolean(job.jobDescription?.trim());
+    !brief &&
+    job.suitabilityScore != null &&
+    Boolean(job.jobDescription?.trim());
   useEffect(() => {
     if (!needsBrief || requestedFor.current === job.id) return;
     requestedFor.current = job.id;
