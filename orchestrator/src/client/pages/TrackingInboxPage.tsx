@@ -56,6 +56,13 @@ import { formatDateTime } from "@/lib/utils";
 import * as api from "../api";
 import { EmptyState, PageHeader, PageMain } from "../components";
 import { EmailViewerList } from "./tracking-inbox/EmailViewerList";
+import {
+  DEFAULT_IMAP_CONNECT_FORM_VALUES,
+  IMAP_CONNECT_FORM_ID,
+  ImapConnectForm,
+  type ImapConnectFormValues,
+  toImapConnectPayload,
+} from "./tracking-inbox/ImapConnectForm";
 
 const PROVIDER_OPTIONS: PostApplicationProvider[] = [
   ...POST_APPLICATION_PROVIDERS,
@@ -83,6 +90,9 @@ export const TrackingInboxPage: React.FC = () => {
   const [maxMessages, setMaxMessages] = useState("100");
   const [searchDays, setSearchDays] = useState("90");
   const isDefaultAccountKey = accountKey.trim() === "default";
+  const [imapForm, setImapForm] = useState<ImapConnectFormValues>(
+    DEFAULT_IMAP_CONNECT_FORM_VALUES,
+  );
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isActionLoading, setIsActionLoading] = useState(false);
@@ -285,25 +295,41 @@ export const TrackingInboxPage: React.FC = () => {
 
   const runProviderAction = useCallback(
     async (action: "connect" | "sync" | "disconnect") => {
+      let imapPayload: Record<string, unknown> | null = null;
+      if (action === "connect" && provider === "imap") {
+        const parsed = toImapConnectPayload(imapForm);
+        if ("error" in parsed) {
+          toast.error(parsed.error);
+          return;
+        }
+        imapPayload = parsed.payload;
+      }
+
       setIsActionLoading(true);
       setActiveAction(action);
       let syncToastId: string | number | null = null;
       try {
-        if (action === "connect") {
+        if (action === "connect" && imapPayload) {
           trackProductEvent("tracking_inbox_connect_started", {
             provider,
             account_key_is_default: isDefaultAccountKey,
           });
-          if (provider !== "gmail") {
-            trackProductEvent("tracking_inbox_connect_completed", {
-              provider,
-              result: "error",
-            });
-            toast.error(
-              `${provider} connect is not implemented yet. Use Gmail for now.`,
-            );
-            return;
-          }
+          await api.postApplicationProviderConnect({
+            provider: "imap",
+            accountKey,
+            payload: imapPayload,
+          });
+          trackProductEvent("tracking_inbox_connect_completed", {
+            provider,
+            result: "success",
+          });
+          toast.success("Provider connected");
+          setImapForm((previous) => ({ ...previous, password: "" }));
+        } else if (action === "connect") {
+          trackProductEvent("tracking_inbox_connect_started", {
+            provider,
+            account_key_is_default: isDefaultAccountKey,
+          });
 
           const oauthStart = await api.postApplicationGmailOauthStart({
             accountKey,
@@ -426,6 +452,7 @@ export const TrackingInboxPage: React.FC = () => {
     },
     [
       accountKey,
+      imapForm,
       isDefaultAccountKey,
       maxMessages,
       provider,
@@ -610,6 +637,17 @@ export const TrackingInboxPage: React.FC = () => {
     return "Connected";
   }, [status]);
 
+  const imapAccountLabel = useMemo(() => {
+    if (!isConnected) return null;
+    const credentials = status?.integration?.credentials;
+    const username =
+      typeof credentials?.username === "string" ? credentials.username : null;
+    const host =
+      typeof credentials?.host === "string" ? credentials.host : null;
+    if (!username || !host) return null;
+    return `${username} @ ${host}`;
+  }, [isConnected, status]);
+
   const handleAppliedJobChange = useCallback(
     (messageId: string, value: string) => {
       setAppliedJobByMessageId((previous) => ({
@@ -694,10 +732,21 @@ export const TrackingInboxPage: React.FC = () => {
                 />
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Gmail connect uses Google OAuth popup and stores credentials
-              server-side. No manual refresh token paste is needed.
-            </p>
+            {provider === "imap" ? (
+              !isConnected ? (
+                <ImapConnectForm
+                  values={imapForm}
+                  onChange={setImapForm}
+                  onSubmit={() => void runProviderAction("connect")}
+                  disabled={isActionLoading}
+                />
+              ) : null
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Gmail connect uses Google OAuth popup and stores credentials
+                server-side. No manual refresh token paste is needed.
+              </p>
+            )}
 
             <div className="grid gap-3 md:grid-cols-4">
               <div className="space-y-2">
@@ -721,7 +770,9 @@ export const TrackingInboxPage: React.FC = () => {
               <div className="md:col-span-2 flex flex-wrap items-end gap-2">
                 {!isConnected ? (
                   <Button
-                    onClick={() => void runProviderAction("connect")}
+                    {...(provider === "imap"
+                      ? { type: "submit" as const, form: IMAP_CONNECT_FORM_ID }
+                      : { onClick: () => void runProviderAction("connect") })}
                     disabled={isActionLoading}
                     className="gap-2"
                   >
@@ -764,6 +815,12 @@ export const TrackingInboxPage: React.FC = () => {
                 Pending review:{" "}
                 <span className="font-semibold">{pendingCount}</span>
               </span>
+              {provider === "imap" && imapAccountLabel ? (
+                <span className="text-muted-foreground">
+                  Account:{" "}
+                  <span className="font-semibold">{imapAccountLabel}</span>
+                </span>
+              ) : null}
               {status?.integration?.lastSyncedAt ? (
                 <span className="text-muted-foreground">
                   Last synced: {formatEpochMs(status.integration.lastSyncedAt)}
