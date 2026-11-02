@@ -1,0 +1,41 @@
+{
+ "id": "001-imap-email-provider",
+ "title": "IMAP email provider",
+ "feature": "Implement the IMAP post-application email provider for MxRoute (password login over TLS 993): connect, status, sync through the shared ingestion and email-router path, disconnect; client connect form next to Gmail; password protected at rest; multi-tenant scoping; tests.",
+ "branch": "factory/001-imap-email-provider",
+ "base": "main",
+ "worktree": "/Users/richards/Code/job-ops-factory/001-imap-email-provider",
+ "reviewers": [
+  {
+   "name": "security",
+   "agent": "fm-factory:reviewer-security",
+   "skills": [
+    "fm-factory:secure-endpoint"
+   ]
+  },
+  {
+   "name": "ux",
+   "agent": "fm-factory:reviewer-ux",
+   "browser": true
+  },
+  {
+   "name": "ui",
+   "agent": "fm-factory:reviewer-ui",
+   "browser": true
+  },
+  {
+   "name": "code",
+   "agent": "fm-factory:reviewer-code"
+  }
+ ],
+ "models": {},
+ "stage": "merged",
+ "round": 2,
+ "reviews": {
+  "security": "PASS",
+  "ux": "PASS",
+  "ui": "PASS",
+  "code": "PASS"
+ },
+ "merged": "2026-11-02"
+}
