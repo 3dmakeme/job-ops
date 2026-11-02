@@ -1,0 +1,41 @@
+{
+  "id": "004-imap-docs-update",
+  "title": "IMAP docs update",
+  "feature": "Update docs-site pages post-application-tracking.md and post-application-workflow.md to describe the IMAP provider (MxRoute example, password stored encrypted, CREDENTIALS_ENCRYPTION_KEY, INBOX read-only sync); also mention the IMAP sync limits of 1 MiB per message and 32 MiB per sync (IMAP_MAX_MESSAGE_BYTES, IMAP_MAX_SYNC_BYTES in imap-client.ts)",
+  "branch": "factory/004-imap-docs-update",
+  "base": "main",
+  "worktree": "/Users/richards/Code/job-ops-factory/004-imap-docs-update",
+  "reviewers": [
+    {
+      "name": "security",
+      "agent": "fm-factory:reviewer-security",
+      "skills": [
+        "fm-factory:secure-endpoint"
+      ]
+    },
+    {
+      "name": "ux",
+      "agent": "fm-factory:reviewer-ux",
+      "browser": true
+    },
+    {
+      "name": "ui",
+      "agent": "fm-factory:reviewer-ui",
+      "browser": true
+    },
+    {
+      "name": "code",
+      "agent": "fm-factory:reviewer-code"
+    }
+  ],
+  "models": {},
+  "stage": "merged",
+  "round": 1,
+  "reviews": {
+    "security": "PASS",
+    "ux": "PASS",
+    "ui": "PASS",
+    "code": "PASS"
+  },
+  "merged": "2026-11-02"
+}
