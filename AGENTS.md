@@ -117,6 +117,8 @@ Run from repository root:
 6. `npm --workspace orchestrator run build:client`
 7. `npm --workspace orchestrator run test:run`
 
+`factory/` (fm-factory tooling: vendored dashboard and generated settings/records) is excluded from Biome via `!!factory` in `biome.json`; do not hand-format files there.
+
 ### Native module note (better-sqlite3)
 
 If tests fail with a Node ABI mismatch for `better-sqlite3`, rebuild it before running tests:
