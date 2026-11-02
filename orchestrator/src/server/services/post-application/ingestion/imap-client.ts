@@ -2,6 +2,10 @@ import { logger } from "@infra/logger";
 import { ImapFlow } from "imapflow";
 
 export const IMAP_CONNECTION_TIMEOUT_MS = 15_000;
+/** Most bytes kept for any single message; larger ones are truncated. */
+export const IMAP_MAX_MESSAGE_BYTES = 1 * 1024 * 1024;
+/** Most message-source bytes held in memory for one sync run. */
+export const IMAP_MAX_SYNC_BYTES = 32 * 1024 * 1024;
 
 export type ImapConnectionConfig = {
   host: string;
@@ -16,11 +20,20 @@ export type ImapFetchedMessage = {
   source: Buffer;
 };
 
+export type ImapMessageSize = {
+  uid: number;
+  size: number | null;
+};
+
 export interface ImapClient {
   connect(): Promise<void>;
   openInboxReadOnly(): Promise<{ uidValidity: string }>;
   searchUidsSince(since: Date): Promise<number[]>;
-  fetchMessageSources(uids: number[]): Promise<ImapFetchedMessage[]>;
+  fetchMessageSizes(uids: number[]): Promise<ImapMessageSize[]>;
+  fetchMessageSources(
+    uids: number[],
+    maxBytes: number,
+  ): Promise<ImapFetchedMessage[]>;
   close(): Promise<void>;
 }
 
@@ -113,18 +126,43 @@ export function createImapClient(config: ImapConnectionConfig): ImapClient {
       }
     },
 
-    async fetchMessageSources(uids: number[]) {
+    async fetchMessageSizes(uids: number[]) {
       if (uids.length === 0) return [];
       try {
-        // `source` is fetched with BODY.PEEK[], so \Seen is never set.
         const messages = await client.fetchAll(
           uids,
-          { uid: true, source: true },
+          { uid: true, size: true },
           { uid: true },
         );
-        return messages.flatMap((message) =>
-          message.source ? [{ uid: message.uid, source: message.source }] : [],
+        return messages.map((message) => ({
+          uid: message.uid,
+          size: typeof message.size === "number" ? message.size : null,
+        }));
+      } catch (error) {
+        throw toImapError(error, "IMAP server fetch failed.");
+      }
+    },
+
+    async fetchMessageSources(uids: number[], maxBytes: number) {
+      if (uids.length === 0) return [];
+      try {
+        // `source` is fetched with BODY.PEEK[]<0.maxBytes>, so \Seen is never
+        // set and the server sends at most maxBytes per message.
+        const messages = await client.fetchAll(
+          uids,
+          { uid: true, source: { maxLength: maxBytes } },
+          { uid: true },
         );
+        return messages.flatMap((message) => {
+          if (!message.source) return [];
+          // Safeguard for servers that ignore the partial range: copy the
+          // prefix so the over-long buffer can be released.
+          const source =
+            message.source.length > maxBytes
+              ? Buffer.from(message.source.subarray(0, maxBytes))
+              : message.source;
+          return [{ uid: message.uid, source }];
+        });
       } catch (error) {
         throw toImapError(error, "IMAP server fetch failed.");
       }

@@ -1,12 +1,16 @@
 import { decryptSecret } from "@infra/credential-crypto";
+import { logger } from "@infra/logger";
 import { getPostApplicationIntegration } from "@server/repositories/post-application-integrations";
 import { normalizeWhitespace } from "@shared/utils/string";
 import { type ParsedMail, simpleParser } from "mailparser";
 import { cleanEmailHtmlForLlm } from "./gmail-api";
 import {
   createImapClient,
+  IMAP_MAX_MESSAGE_BYTES,
+  IMAP_MAX_SYNC_BYTES,
   type ImapConnectionConfig,
   type ImapFetchedMessage,
+  type ImapMessageSize,
 } from "./imap-client";
 import {
   type IngestItem,
@@ -128,7 +132,41 @@ export function mapParsedImapMessage(
   };
 }
 
+/**
+ * Greedy newest-first fit of UIDs into the per-sync byte budget. Each UID is
+ * charged its reported size capped at the per-message limit (the cap when the
+ * size is unknown); UIDs that do not fit are skipped so older, smaller ones can.
+ */
+function selectUidsWithinBudget(
+  newestUids: number[],
+  sizes: ImapMessageSize[],
+): { selected: number[]; skipped: number[]; truncated: ImapMessageSize[] } {
+  const sizeByUid = new Map(sizes.map((entry) => [entry.uid, entry.size]));
+  const selected: number[] = [];
+  const skipped: number[] = [];
+  const truncated: ImapMessageSize[] = [];
+  let remaining = IMAP_MAX_SYNC_BYTES;
+  for (const uid of newestUids) {
+    const size = sizeByUid.get(uid) ?? null;
+    const charge =
+      size === null
+        ? IMAP_MAX_MESSAGE_BYTES
+        : Math.min(size, IMAP_MAX_MESSAGE_BYTES);
+    if (charge > remaining) {
+      skipped.push(uid);
+      continue;
+    }
+    remaining -= charge;
+    selected.push(uid);
+    if (size !== null && size > IMAP_MAX_MESSAGE_BYTES) {
+      truncated.push({ uid, size });
+    }
+  }
+  return { selected, skipped, truncated };
+}
+
 async function fetchRecentInboxMessages(
+  accountKey: string,
   config: ImapConnectionConfig,
   searchDays: number,
   maxMessages: number,
@@ -140,7 +178,35 @@ async function fetchRecentInboxMessages(
     const since = new Date(Date.now() - searchDays * 24 * 60 * 60 * 1000);
     const uids = await client.searchUidsSince(since);
     const newestUids = [...uids].sort((a, b) => b - a).slice(0, maxMessages);
-    const messages = await client.fetchMessageSources(newestUids);
+    const sizes = await client.fetchMessageSizes(newestUids);
+    const { selected, skipped, truncated } = selectUidsWithinBudget(
+      newestUids,
+      sizes,
+    );
+
+    for (const { uid, size } of truncated) {
+      logger.warn("IMAP message exceeds size limit; truncating", {
+        provider: "imap",
+        accountKey,
+        uid,
+        sizeBytes: size,
+        limitBytes: IMAP_MAX_MESSAGE_BYTES,
+      });
+    }
+    if (skipped.length > 0) {
+      logger.warn("IMAP sync byte budget exceeded; skipping messages", {
+        provider: "imap",
+        accountKey,
+        skippedCount: skipped.length,
+        skippedUids: skipped,
+        budgetBytes: IMAP_MAX_SYNC_BYTES,
+      });
+    }
+
+    const messages = await client.fetchMessageSources(
+      selected,
+      IMAP_MAX_MESSAGE_BYTES,
+    );
     return { uidValidity, messages };
   } finally {
     await client.close();
@@ -178,6 +244,7 @@ export async function runImapIngestionSync(args: {
     failureErrorCode: "IMAP_SYNC_FAILED",
     listItems: async (): Promise<IngestItem[]> => {
       const { uidValidity, messages } = await fetchRecentInboxMessages(
+        args.accountKey,
         {
           host: stored.host,
           port: stored.port,

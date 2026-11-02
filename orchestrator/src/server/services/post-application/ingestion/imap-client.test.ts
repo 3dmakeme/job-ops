@@ -23,6 +23,8 @@ vi.mock("imapflow", () => ({ ImapFlow: mocks.ImapFlow }));
 
 import {
   createImapClient,
+  IMAP_MAX_MESSAGE_BYTES,
+  IMAP_MAX_SYNC_BYTES,
   ImapAuthenticationError,
   ImapConnectionError,
 } from "./imap-client";
@@ -120,7 +122,7 @@ describe("imap client", () => {
       uidValidity: "42",
     });
     await expect(client.searchUidsSince(since)).resolves.toEqual([1, 2]);
-    await expect(client.fetchMessageSources([2, 1])).resolves.toEqual([
+    await expect(client.fetchMessageSources([2, 1], 1024)).resolves.toEqual([
       { uid: 2, source: Buffer.from("raw") },
     ]);
 
@@ -133,9 +135,84 @@ describe("imap client", () => {
     );
     expect(mocks.instance.fetchAll).toHaveBeenCalledWith(
       [2, 1],
-      { uid: true, source: true },
+      { uid: true, source: { maxLength: 1024 } },
       { uid: true },
     );
+  });
+
+  it("exports a 1 MiB per-message cap and a 32 MiB per-sync budget", () => {
+    expect(IMAP_MAX_MESSAGE_BYTES).toBe(1024 * 1024);
+    expect(IMAP_MAX_SYNC_BYTES).toBe(32 * 1024 * 1024);
+  });
+
+  it("slices a returned source longer than the limit to exactly the limit", async () => {
+    mocks.instance.fetchAll.mockResolvedValueOnce([
+      { uid: 5, source: Buffer.from("0123456789") },
+      { uid: 4, source: Buffer.from("0123") },
+    ]);
+
+    const messages = await createImapClient(config).fetchMessageSources(
+      [5, 4],
+      4,
+    );
+
+    expect(mocks.instance.fetchAll).toHaveBeenCalledWith(
+      [5, 4],
+      { uid: true, source: { maxLength: 4 } },
+      { uid: true },
+    );
+    expect(messages).toEqual([
+      { uid: 5, source: Buffer.from("0123") },
+      { uid: 4, source: Buffer.from("0123") },
+    ]);
+    expect(messages[0]?.source).toHaveLength(4);
+  });
+
+  it("does not call the server for an empty source fetch", async () => {
+    await expect(
+      createImapClient(config).fetchMessageSources([], 4),
+    ).resolves.toEqual([]);
+    expect(mocks.instance.fetchAll).not.toHaveBeenCalled();
+  });
+
+  it("fetches message sizes by UID and maps a missing size to null", async () => {
+    mocks.instance.fetchAll.mockResolvedValueOnce([
+      { uid: 3, size: 2048 },
+      { uid: 2 },
+    ]);
+
+    await expect(
+      createImapClient(config).fetchMessageSizes([3, 2]),
+    ).resolves.toEqual([
+      { uid: 3, size: 2048 },
+      { uid: 2, size: null },
+    ]);
+    expect(mocks.instance.fetchAll).toHaveBeenCalledWith(
+      [3, 2],
+      { uid: true, size: true },
+      { uid: true },
+    );
+  });
+
+  it("returns no sizes for an empty UID list without calling the server", async () => {
+    await expect(
+      createImapClient(config).fetchMessageSizes([]),
+    ).resolves.toEqual([]);
+    expect(mocks.instance.fetchAll).not.toHaveBeenCalled();
+  });
+
+  it("maps a size fetch failure to a connection error", async () => {
+    mocks.instance.fetchAll.mockRejectedValueOnce(
+      Object.assign(new Error("BAD fetch"), { code: "EPIPE" }),
+    );
+
+    const error = await createImapClient(config)
+      .fetchMessageSizes([1])
+      .catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ImapConnectionError);
+    expect(error.message).toBe("IMAP server fetch failed.");
+    expect(error.code).toBe("EPIPE");
   });
 
   it("logs out on close and falls back to closing the socket", async () => {

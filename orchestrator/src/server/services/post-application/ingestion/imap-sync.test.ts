@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
     connect: vi.fn(),
     openInboxReadOnly: vi.fn(),
     searchUidsSince: vi.fn(),
+    fetchMessageSizes: vi.fn(),
     fetchMessageSources: vi.fn(),
     close: vi.fn(),
     // Flag/move/delete methods must never be reached by a read-only sync.
@@ -82,7 +83,12 @@ vi.mock("./email-router", async (importOriginal) => ({
   classifyWithSmartRouter: mocks.classifyWithSmartRouter,
 }));
 
+import { IMAP_MAX_MESSAGE_BYTES, IMAP_MAX_SYNC_BYTES } from "./imap-client";
 import { runImapIngestionSync } from "./imap-sync";
+
+const MiB = 1024 * 1024;
+const TRUNCATION_WARNING = "IMAP message exceeds size limit; truncating";
+const BUDGET_WARNING = "IMAP sync byte budget exceeded; skipping messages";
 
 function rawMessage(headers: Record<string, string>, body: string): Buffer {
   const headerText = Object.entries(headers)
@@ -164,6 +170,9 @@ beforeEach(() => {
   mocks.client.connect.mockResolvedValue(undefined);
   mocks.client.openInboxReadOnly.mockResolvedValue({ uidValidity: "777" });
   mocks.client.searchUidsSince.mockResolvedValue([10, 12, 11]);
+  mocks.client.fetchMessageSizes.mockImplementation(async (uids: number[]) =>
+    uids.map((uid) => ({ uid, size: 4096 })),
+  );
   mocks.client.fetchMessageSources.mockResolvedValue([
     { uid: 12, source: textMessage },
     { uid: 11, source: htmlMessage },
@@ -220,7 +229,11 @@ describe("imap ingestion sync", () => {
     const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
     expect(since.getTime()).toBeGreaterThanOrEqual(before - ninetyDaysMs);
     expect(since.getTime()).toBeLessThanOrEqual(Date.now() - ninetyDaysMs);
-    expect(mocks.client.fetchMessageSources).toHaveBeenCalledWith([12, 11]);
+    expect(mocks.client.fetchMessageSizes).toHaveBeenCalledWith([12, 11]);
+    expect(mocks.client.fetchMessageSources).toHaveBeenCalledWith(
+      [12, 11],
+      IMAP_MAX_MESSAGE_BYTES,
+    );
   });
 
   it("maps messages and upserts them with provider imap", async () => {
@@ -412,6 +425,132 @@ describe("imap ingestion sync", () => {
     ).rejects.toThrow("IMAP account 'default' is not connected.");
     expect(mocks.createImapClient).not.toHaveBeenCalled();
     expect(mocks.startPostApplicationSyncRun).not.toHaveBeenCalled();
+  });
+
+  it("logs no size warnings when every message is small", async () => {
+    await runImapIngestionSync({ accountKey: "default" });
+
+    expect(mocks.client.fetchMessageSources).toHaveBeenCalledWith(
+      [12, 11, 10],
+      IMAP_MAX_MESSAGE_BYTES,
+    );
+    expect(mocks.warn).not.toHaveBeenCalled();
+  });
+
+  it("truncates and still ingests a message over the per-message cap", async () => {
+    mocks.client.fetchMessageSizes.mockResolvedValue([
+      { uid: 12, size: 5 * MiB },
+      { uid: 11, size: 4096 },
+      { uid: 10, size: 4096 },
+    ]);
+
+    const summary = await runImapIngestionSync({ accountKey: "default" });
+
+    expect(mocks.client.fetchMessageSources).toHaveBeenCalledWith(
+      [12, 11, 10],
+      IMAP_MAX_MESSAGE_BYTES,
+    );
+    expect(summary.discovered).toBe(3);
+    expect(upsertCallFor("abc123@mail.example.com")).toMatchObject({
+      provider: "imap",
+      subject: "Interview invitation",
+    });
+    expect(mocks.warn).toHaveBeenCalledTimes(1);
+    expect(mocks.warn).toHaveBeenCalledWith(
+      TRUNCATION_WARNING,
+      expect.objectContaining({
+        provider: "imap",
+        accountKey: "default",
+        uid: 12,
+        sizeBytes: 5 * MiB,
+        limitBytes: IMAP_MAX_MESSAGE_BYTES,
+      }),
+    );
+    const [, fields] = mocks.warn.mock.calls[0] ?? [];
+    expect(Object.keys(fields).sort()).toEqual(
+      ["accountKey", "limitBytes", "provider", "sizeBytes", "uid"].sort(),
+    );
+  });
+
+  it("skips messages beyond the sync budget and fits smaller older ones", async () => {
+    // UIDs 100..69 (32 messages) leave 320 bytes of the 32 MiB budget.
+    const fullUids = Array.from({ length: 32 }, (_, index) => 100 - index);
+    mocks.client.searchUidsSince.mockResolvedValue([66, 67, 68, ...fullUids]);
+    mocks.client.fetchMessageSizes.mockResolvedValue([
+      ...fullUids.map((uid) => ({ uid, size: MiB - 10 })),
+      { uid: 68, size: MiB },
+      { uid: 67, size: 100 },
+      { uid: 66, size: null },
+    ]);
+    mocks.client.fetchMessageSources.mockResolvedValue([
+      { uid: 100, source: textMessage },
+      { uid: 67, source: unthreadedMessage },
+    ]);
+
+    const summary = await runImapIngestionSync({ accountKey: "default" });
+
+    const [fetchedUids, limit] =
+      mocks.client.fetchMessageSources.mock.calls[0] ?? [];
+    expect(fetchedUids).toEqual([...fullUids, 67]);
+    expect(fetchedUids).not.toContain(68);
+    expect(fetchedUids).not.toContain(66);
+    expect(limit).toBe(IMAP_MAX_MESSAGE_BYTES);
+    expect(summary.discovered).toBe(2);
+    expect(upsertCallFor("news@example.net")).toMatchObject({
+      provider: "imap",
+    });
+    expect(mocks.warn).toHaveBeenCalledTimes(1);
+    expect(mocks.warn).toHaveBeenCalledWith(
+      BUDGET_WARNING,
+      expect.objectContaining({
+        provider: "imap",
+        accountKey: "default",
+        skippedCount: 2,
+        skippedUids: [68, 66],
+        budgetBytes: IMAP_MAX_SYNC_BYTES,
+      }),
+    );
+    const [, fields] = mocks.warn.mock.calls[0] ?? [];
+    expect(Object.keys(fields).sort()).toEqual(
+      [
+        "accountKey",
+        "budgetBytes",
+        "provider",
+        "skippedCount",
+        "skippedUids",
+      ].sort(),
+    );
+  });
+
+  it("charges a message with no reported size at the per-message cap", async () => {
+    // 32 unknown-size messages use the whole budget, so even 1 byte is skipped.
+    const unknownUids = Array.from({ length: 32 }, (_, index) => 33 - index);
+    mocks.client.searchUidsSince.mockResolvedValue([1, ...unknownUids]);
+    mocks.client.fetchMessageSizes.mockResolvedValue([
+      ...unknownUids.map((uid) => ({ uid, size: null })),
+      { uid: 1, size: 1 },
+    ]);
+
+    await runImapIngestionSync({ accountKey: "default" });
+
+    expect(mocks.client.fetchMessageSources).toHaveBeenCalledWith(
+      unknownUids,
+      IMAP_MAX_MESSAGE_BYTES,
+    );
+    expect(mocks.warn).toHaveBeenCalledWith(
+      BUDGET_WARNING,
+      expect.objectContaining({
+        provider: "imap",
+        accountKey: "default",
+        skippedCount: 1,
+        skippedUids: [1],
+        budgetBytes: IMAP_MAX_SYNC_BYTES,
+      }),
+    );
+    expect(mocks.warn).not.toHaveBeenCalledWith(
+      TRUNCATION_WARNING,
+      expect.anything(),
+    );
   });
 
   it("treats a missing integration as not connected", async () => {
