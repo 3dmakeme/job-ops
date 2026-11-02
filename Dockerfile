@@ -187,7 +187,9 @@ FROM runtime-node-deps AS camoufox-cache
 # Fetch target-platform Camoufox binaries after production dependencies are
 # installed so arm64 images do not inherit x64 browser assets from build stages.
 COPY scripts/camoufox-fetch.mjs ./scripts/camoufox-fetch.mjs
-RUN node ./scripts/camoufox-fetch.mjs
+RUN --mount=type=secret,id=github_token \
+    GITHUB_TOKEN="$(cat /run/secrets/github_token 2>/dev/null || true)" \
+    node ./scripts/camoufox-fetch.mjs
 
 FROM runtime-base AS tectonic
 
