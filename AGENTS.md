@@ -65,6 +65,7 @@ Use consistent status/code mapping:
 - LLM prompts: send only required profile/job fields; avoid unnecessary PII.
 - Document external payload behavior when adding new integrations.
 - IMAP credentials are stored AES-256-GCM encrypted through `infra/credential-crypto.ts` (key from `CREDENTIALS_ENCRYPTION_KEY` or `DATA_DIR/credentials-key`). New stored integration secrets must use that helper.
+- IMAP sync truncates each message to `IMAP_MAX_MESSAGE_BYTES` (1 MiB) and caps the per-sync total at `IMAP_MAX_SYNC_BYTES` (32 MiB), skipping messages beyond the budget with a warning; both constants live in `orchestrator/src/server/services/post-application/ingestion/imap-client.ts`.
 
 ## PR Checklist (Routes/Services)
 
