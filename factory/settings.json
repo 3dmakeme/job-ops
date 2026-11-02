@@ -1,0 +1,10 @@
+{
+  "baseBranch": "main",
+  "gates": { "spec": true, "merge": true },
+  "reviewers": [
+    { "name": "security", "agent": "fm-factory:reviewer-security", "skills": ["fm-factory:secure-endpoint"] },
+    { "name": "ux", "agent": "fm-factory:reviewer-ux", "browser": true },
+    { "name": "ui", "agent": "fm-factory:reviewer-ui", "browser": true },
+    { "name": "code", "agent": "fm-factory:reviewer-code" }
+  ]
+}

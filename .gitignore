@@ -32,3 +32,6 @@ tmp/
 
 # Runtime storage artifacts
 orchestrator/storage
+
+# fm-factory job state (runtime only)
+/factory/jobs/
