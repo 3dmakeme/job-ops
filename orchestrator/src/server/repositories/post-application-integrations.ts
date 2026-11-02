@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type {
   PostApplicationIntegration,
   PostApplicationIntegrationStatus,
@@ -199,4 +200,50 @@ export async function updatePostApplicationIntegrationSyncState(
     );
 
   return getPostApplicationIntegration(input.provider, input.accountKey);
+}
+
+/**
+ * Replaces `credentials` only if the stored value still equals
+ * `expectedCredentials`. The compare and the write run in one transaction, so
+ * a disconnect or reconnect that lands after the caller's read is never
+ * overwritten. Returns whether the write happened.
+ */
+export async function replacePostApplicationIntegrationCredentialsIfUnchanged(input: {
+  provider: PostApplicationProvider;
+  accountKey: string;
+  expectedCredentials: IntegrationCredentials;
+  credentials: IntegrationCredentials;
+}): Promise<boolean> {
+  const scopeFilter = integrationsScopeFilter();
+  return db.transaction((tx) => {
+    const row = tx
+      .select()
+      .from(postApplicationIntegrations)
+      .where(
+        and(
+          eq(postApplicationIntegrations.provider, input.provider),
+          eq(postApplicationIntegrations.accountKey, input.accountKey),
+          scopeFilter,
+        ),
+      )
+      .get();
+    if (
+      !row ||
+      !isDeepStrictEqual(
+        asCredentials(row.credentials),
+        input.expectedCredentials,
+      )
+    ) {
+      return false;
+    }
+
+    tx.update(postApplicationIntegrations)
+      .set({
+        credentials: input.credentials,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(and(scopeFilter, eq(postApplicationIntegrations.id, row.id)))
+      .run();
+    return true;
+  });
 }

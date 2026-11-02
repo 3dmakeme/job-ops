@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   decryptSecret: vi.fn(),
   getPostApplicationIntegration: vi.fn(),
   updatePostApplicationIntegrationSyncState: vi.fn(),
+  replaceCredentialsIfUnchanged: vi.fn(),
   getPostApplicationMessageByExternalId: vi.fn(),
   upsertPostApplicationMessage: vi.fn(),
   startPostApplicationSyncRun: vi.fn(),
@@ -57,6 +58,8 @@ vi.mock("@server/repositories/post-application-integrations", () => ({
   getPostApplicationIntegration: mocks.getPostApplicationIntegration,
   updatePostApplicationIntegrationSyncState:
     mocks.updatePostApplicationIntegrationSyncState,
+  replacePostApplicationIntegrationCredentialsIfUnchanged:
+    mocks.replaceCredentialsIfUnchanged,
   upsertConnectedPostApplicationIntegration: vi.fn(),
 }));
 
@@ -193,9 +196,7 @@ function sourcesFor(uids: number[]) {
 }
 
 function credentialWrites() {
-  return mocks.updatePostApplicationIntegrationSyncState.mock.calls
-    .map(([input]) => input)
-    .filter((input) => input.credentials !== undefined);
+  return mocks.replaceCredentialsIfUnchanged.mock.calls.map(([input]) => input);
 }
 
 function storedWatermarks() {
@@ -233,6 +234,7 @@ beforeEach(() => {
   });
   mocks.completePostApplicationSyncRun.mockResolvedValue(null);
   mocks.updatePostApplicationIntegrationSyncState.mockResolvedValue(null);
+  mocks.replaceCredentialsIfUnchanged.mockResolvedValue(true);
   mocks.classifyWithSmartRouter.mockResolvedValue({
     bestMatchId: null,
     confidence: 60,
@@ -644,7 +646,13 @@ describe("imap ingestion sync", () => {
       expect(credentialWrites()[0]).toMatchObject({
         provider: "imap",
         accountKey: "default",
+        expectedCredentials: connectedIntegration().credentials,
       });
+      expect(
+        mocks.updatePostApplicationIntegrationSyncState,
+      ).not.toHaveBeenCalledWith(
+        expect.objectContaining({ credentials: expect.anything() }),
+      );
       expect(mocks.info).toHaveBeenCalledWith(WATERMARK_LOG, {
         provider: "imap",
         accountKey: "default",
@@ -652,6 +660,7 @@ describe("imap ingestion sync", () => {
         candidateCount: 100,
         previousLastUid: null,
         newLastUid: 150,
+        watermarkWrite: "stored",
       });
     });
 
@@ -699,6 +708,7 @@ describe("imap ingestion sync", () => {
         candidateCount: 3,
         previousLastUid: 20,
         newLastUid: 23,
+        watermarkWrite: "stored",
       });
       expect(mocks.warn).not.toHaveBeenCalled();
     });
@@ -729,6 +739,7 @@ describe("imap ingestion sync", () => {
         candidateCount: 3,
         previousLastUid: 500,
         newLastUid: 12,
+        watermarkWrite: "stored",
       });
     });
 
@@ -833,7 +844,11 @@ describe("imap ingestion sync", () => {
       expect(credentialWrites()).toEqual([]);
       expect(mocks.info).toHaveBeenCalledWith(
         WATERMARK_LOG,
-        expect.objectContaining({ previousLastUid: 9, newLastUid: 9 }),
+        expect.objectContaining({
+          previousLastUid: 9,
+          newLastUid: 9,
+          watermarkWrite: "unchanged",
+        }),
       );
     });
 
@@ -857,6 +872,7 @@ describe("imap ingestion sync", () => {
         candidateCount: 0,
         previousLastUid: 40,
         newLastUid: 40,
+        watermarkWrite: "unchanged",
       });
     });
 
@@ -926,6 +942,13 @@ describe("imap ingestion sync", () => {
 
       expect(mocks.getPostApplicationIntegration).toHaveBeenCalledTimes(2);
       expect(credentialWrites()).toEqual([]);
+      expect(mocks.info).toHaveBeenCalledWith(
+        WATERMARK_LOG,
+        expect.objectContaining({
+          newLastUid: null,
+          watermarkWrite: "skipped",
+        }),
+      );
     });
 
     it("skips the write when the account was disconnected during the sync", async () => {
@@ -940,14 +963,52 @@ describe("imap ingestion sync", () => {
       await runImapIngestionSync({ accountKey: "default" });
 
       expect(credentialWrites()).toEqual([]);
+      expect(mocks.info).toHaveBeenCalledWith(
+        WATERMARK_LOG,
+        expect.objectContaining({
+          newLastUid: null,
+          watermarkWrite: "skipped",
+        }),
+      );
+    });
+
+    it("skips the write when the account was reconnected with a new password", async () => {
+      mocks.getPostApplicationIntegration
+        .mockResolvedValueOnce(connectedIntegration())
+        .mockResolvedValueOnce(
+          integrationWith({ passwordEncrypted: "v1:new:tag:ciphertext" }),
+        );
+
+      await runImapIngestionSync({ accountKey: "default" });
+
+      expect(credentialWrites()).toEqual([]);
+    });
+
+    it("logs a skipped write without a new lastUid when the credentials changed before the write", async () => {
+      mocks.replaceCredentialsIfUnchanged.mockResolvedValue(false);
+
+      const summary = await runImapIngestionSync({ accountKey: "default" });
+
+      expect(summary.discovered).toBe(3);
+      expect(credentialWrites()).toHaveLength(1);
+      expect(mocks.info).toHaveBeenCalledWith(WATERMARK_LOG, {
+        provider: "imap",
+        accountKey: "default",
+        mode: "first",
+        candidateCount: 3,
+        previousLastUid: null,
+        newLastUid: null,
+        watermarkWrite: "skipped",
+      });
+      const [, fields] =
+        mocks.info.mock.calls.find(([message]) => message === WATERMARK_LOG) ??
+        [];
+      expect(JSON.stringify(fields)).not.toContain("ciphertext");
     });
 
     it("fails the run when the watermark cannot be stored", async () => {
-      mocks.updatePostApplicationIntegrationSyncState.mockImplementation(
-        async (input) => {
-          if (input.credentials !== undefined) throw new Error("disk full");
-          return null;
-        },
+      mocks.replaceCredentialsIfUnchanged.mockRejectedValue(
+        new Error("disk full"),
       );
 
       await expect(

@@ -17,7 +17,50 @@ const mocks = vi.hoisted(() => ({
   },
   createImapClient: vi.fn(),
   classifyWithSmartRouter: vi.fn(),
+  beforeCredentialsWrite: null as null | (() => Promise<unknown>),
 }));
+
+// Lets a test run a disconnect or reconnect between the watermark save's read
+// and its conditional write. Each call resolves the real module afresh, since
+// the factory result outlives `vi.resetModules()` and its closed database.
+vi.mock("@server/repositories/post-application-integrations", () => {
+  type Repository =
+    typeof import("@server/repositories/post-application-integrations");
+  const actual = () =>
+    vi.importActual<Repository>(
+      "@server/repositories/post-application-integrations",
+    );
+  return {
+    getPostApplicationIntegration: async (
+      ...args: Parameters<Repository["getPostApplicationIntegration"]>
+    ) => (await actual()).getPostApplicationIntegration(...args),
+    upsertConnectedPostApplicationIntegration: async (
+      ...args: Parameters<
+        Repository["upsertConnectedPostApplicationIntegration"]
+      >
+    ) => (await actual()).upsertConnectedPostApplicationIntegration(...args),
+    disconnectPostApplicationIntegration: async (
+      ...args: Parameters<Repository["disconnectPostApplicationIntegration"]>
+    ) => (await actual()).disconnectPostApplicationIntegration(...args),
+    updatePostApplicationIntegrationSyncState: async (
+      ...args: Parameters<
+        Repository["updatePostApplicationIntegrationSyncState"]
+      >
+    ) => (await actual()).updatePostApplicationIntegrationSyncState(...args),
+    replacePostApplicationIntegrationCredentialsIfUnchanged: async (
+      ...args: Parameters<
+        Repository["replacePostApplicationIntegrationCredentialsIfUnchanged"]
+      >
+    ) => {
+      const interleave = mocks.beforeCredentialsWrite;
+      mocks.beforeCredentialsWrite = null;
+      await interleave?.();
+      return (
+        await actual()
+      ).replacePostApplicationIntegrationCredentialsIfUnchanged(...args);
+    },
+  };
+});
 
 vi.mock(
   "@server/services/post-application/ingestion/imap-client",
@@ -127,6 +170,7 @@ describe.sequential("imap post-application provider", () => {
     mocks.client.fetchMessageSources.mockImplementation(
       async (uids: number[]) => sourcesFor(uids),
     );
+    mocks.beforeCredentialsWrite = null;
     mocks.classifyWithSmartRouter.mockReset().mockResolvedValue({
       bestMatchId: null,
       confidence: 10,
@@ -376,6 +420,60 @@ describe.sequential("imap post-application provider", () => {
     expect(mocks.client.searchUidsSince).toHaveBeenCalledTimes(1);
     expect(await readStoredCredentials()).toMatchObject({
       syncWatermark: { uidValidity: "777", lastUid: 13 },
+    });
+  });
+
+  it("does not restore credentials removed by a disconnect during the watermark save", async () => {
+    await connect(validPayload);
+    mocks.beforeCredentialsWrite = () =>
+      executePostApplicationProviderAction({
+        provider: "imap",
+        action: "disconnect",
+        accountKey: "default",
+      });
+
+    await sync();
+
+    expect(mocks.beforeCredentialsWrite).toBeNull();
+    expect(await readStoredCredentials()).toBeNull();
+  });
+
+  it("keeps a new password set by a reconnect during the watermark save", async () => {
+    const { decryptSecret } = await import("@infra/credential-crypto");
+    await connect(validPayload);
+    const original = (await readStoredCredentials()) as Record<string, unknown>;
+    const newPassword = "n3w-Imap-Passw0rd!";
+    mocks.beforeCredentialsWrite = () =>
+      connect({ ...validPayload, password: newPassword });
+
+    await sync();
+
+    expect(mocks.beforeCredentialsWrite).toBeNull();
+    const credentials = (await readStoredCredentials()) as Record<
+      string,
+      unknown
+    >;
+    expect(credentials.passwordEncrypted).not.toBe(original.passwordEncrypted);
+    await expect(
+      decryptSecret(credentials.passwordEncrypted as string),
+    ).resolves.toBe(newPassword);
+    expect(credentials).not.toHaveProperty("syncWatermark");
+  });
+
+  it("saves the watermark when nothing changes during the save", async () => {
+    await connect(validPayload);
+    const before = (await readStoredCredentials()) as Record<string, unknown>;
+    let interleaved = false;
+    mocks.beforeCredentialsWrite = async () => {
+      interleaved = true;
+    };
+
+    await sync();
+
+    expect(interleaved).toBe(true);
+    expect(await readStoredCredentials()).toEqual({
+      ...before,
+      syncWatermark: { uidValidity: "777", lastUid: 12 },
     });
   });
 

@@ -3,7 +3,7 @@ import { decryptSecret } from "@infra/credential-crypto";
 import { logger } from "@infra/logger";
 import {
   getPostApplicationIntegration,
-  updatePostApplicationIntegrationSyncState,
+  replacePostApplicationIntegrationCredentialsIfUnchanged,
 } from "@server/repositories/post-application-integrations";
 import { normalizeWhitespace } from "@shared/utils/string";
 import { type ParsedMail, simpleParser } from "mailparser";
@@ -45,6 +45,9 @@ export type ImapSyncWatermark = {
 };
 
 type ImapSyncMode = "first" | "incremental" | "reset";
+
+/** `skipped`: the account was disconnected or reconnected during the sync. */
+type ImapWatermarkWrite = "stored" | "unchanged" | "skipped";
 
 type InboxFetchResult = {
   uidValidity: string;
@@ -313,13 +316,15 @@ function resolveNextWatermark(
 
 /**
  * Writes the watermark into the account's current credentials, unless the
- * account was reconnected to another mailbox or disconnected during the sync.
+ * account was reconnected or disconnected during the sync. The write only
+ * lands if the credentials still equal the ones read here, so it can never
+ * restore removed or replaced credentials.
  */
 async function persistImapSyncWatermark(
   accountKey: string,
   connected: StoredImapCredentials,
   watermark: ImapSyncWatermark | null,
-): Promise<void> {
+): Promise<ImapWatermarkWrite> {
   const integration = await getPostApplicationIntegration("imap", accountKey);
   const currentCredentials = integration?.credentials ?? null;
   const current = parseStoredImapCredentials(currentCredentials);
@@ -328,29 +333,34 @@ async function persistImapSyncWatermark(
     !current ||
     current.host !== connected.host ||
     current.port !== connected.port ||
-    current.username !== connected.username
+    current.username !== connected.username ||
+    current.passwordEncrypted !== connected.passwordEncrypted
   ) {
-    return;
+    return "skipped";
   }
 
   const { syncWatermark: storedWatermark, ...otherCredentials } =
     currentCredentials;
-  if (watermark === null) {
-    if (!("syncWatermark" in currentCredentials)) return;
-    await updatePostApplicationIntegrationSyncState({
-      provider: "imap",
-      accountKey,
-      credentials: otherCredentials,
-    });
-    return;
+  if (
+    watermark === null
+      ? !("syncWatermark" in currentCredentials)
+      : isDeepStrictEqual(storedWatermark, watermark)
+  ) {
+    return "unchanged";
   }
 
-  if (isDeepStrictEqual(storedWatermark, watermark)) return;
-  await updatePostApplicationIntegrationSyncState({
-    provider: "imap",
-    accountKey,
-    credentials: { ...currentCredentials, syncWatermark: watermark },
-  });
+  const written = await replacePostApplicationIntegrationCredentialsIfUnchanged(
+    {
+      provider: "imap",
+      accountKey,
+      expectedCredentials: currentCredentials,
+      credentials:
+        watermark === null
+          ? otherCredentials
+          : { ...currentCredentials, syncWatermark: watermark },
+    },
+  );
+  return written ? "stored" : "skipped";
 }
 
 export async function runImapIngestionSync(args: {
@@ -415,6 +425,10 @@ export async function runImapIngestionSync(args: {
     onItemsProcessed: async (outcome) => {
       if (!fetched) return;
       const next = resolveNextWatermark(fetched, previousWatermark, outcome);
+      const write =
+        next === undefined
+          ? "unchanged"
+          : await persistImapSyncWatermark(args.accountKey, stored, next);
       logger.info("IMAP sync watermark", {
         provider: "imap",
         accountKey: args.accountKey,
@@ -422,11 +436,12 @@ export async function runImapIngestionSync(args: {
         candidateCount: fetched.candidates.length,
         previousLastUid: previousWatermark?.lastUid ?? null,
         newLastUid:
-          (next === undefined ? previousWatermark : next)?.lastUid ?? null,
+          write === "skipped"
+            ? null
+            : ((next === undefined ? previousWatermark : next)?.lastUid ??
+              null),
+        watermarkWrite: write,
       });
-      if (next !== undefined) {
-        await persistImapSyncWatermark(args.accountKey, stored, next);
-      }
     },
   });
 }
