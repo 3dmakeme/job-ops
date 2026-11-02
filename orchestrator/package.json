@@ -21,6 +21,7 @@
     "benchmark:jobs": "tsx scripts/benchmark-jobs.ts",
     "db:migrate": "tsx src/server/db/migrate.ts",
     "db:migrate:prod": "tsx src/server/db/migrate.ts",
+    "db:rollback-gmail-token-encryption": "tsx src/server/db/rollback-gmail-token-encryption.ts",
     "db:clear": "tsx src/server/db/clear.ts",
     "db:drop": "tsx src/server/db/clear.ts --drop",
     "pipeline:run": "tsx src/server/pipeline/run.ts",
