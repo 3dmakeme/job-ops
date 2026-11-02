@@ -299,7 +299,10 @@ describe("WatchlistPage", () => {
     expect(
       screen.getByRole("columnheader", { name: "Posted" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("May 1, 2026")).toBeInTheDocument();
+    const expectedPostedDate = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+    }).format(new Date("2026-05-01"));
+    expect(screen.getByText(expectedPostedDate)).toBeInTheDocument();
     expect(
       screen.getAllByRole("button", { name: /more actions/i }),
     ).toHaveLength(2);
