@@ -1,5 +1,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { readdirSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -640,6 +646,8 @@ describe.sequential("gmail token encryption migration", () => {
     expect(runMigrate(dataDir).status).toBe(0);
 
     const sqlite = new Database(join(dataDir, "jobs.db"));
+    // Production runs in WAL mode (db/index.ts), and the mode persists in the file.
+    sqlite.pragma("journal_mode = WAL");
     sqlite.exec(`
       INSERT INTO tenants(id, name, slug) VALUES ('tenant_b', 'B', 'b');
       INSERT INTO users(id, username) VALUES ('user_a', 'a'), ('user_b', 'b');
@@ -789,23 +797,64 @@ describe.sequential("gmail token encryption migration", () => {
     });
   });
 
+  it("purges leftover plaintext tokens from jobs.db and its WAL", async () => {
+    tempDir = await seedLegacyDb();
+    const dbPath = join(tempDir, "jobs.db");
+
+    const result = runMigrate(tempDir);
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain(
+      "Purged plaintext Gmail tokens from database file",
+    );
+    expectNoTokens(result.output);
+
+    const walPath = `${dbPath}-wal`;
+    const liveFiles = [dbPath, ...(existsSync(walPath) ? [walPath] : [])];
+    for (const file of liveFiles) {
+      const bytes = readFileSync(file);
+      for (const token of SEEDED_TOKENS) {
+        expect(bytes.includes(token)).toBe(false);
+      }
+    }
+
+    const backups = filesWithPrefix(
+      tempDir,
+      "jobs_pre_gmail_token_encryption_",
+    );
+    expect(backups).toHaveLength(1);
+    const backupBytes = readFileSync(join(tempDir, backups[0]));
+    for (const token of SEEDED_TOKENS) {
+      expect(backupBytes.includes(token)).toBe(true);
+    }
+  });
+
   it("is a no-op on repeated runs and on databases without gmail rows", async () => {
     tempDir = await seedLegacyDb();
     const dbPath = join(tempDir, "jobs.db");
     expect(runMigrate(tempDir).status).toBe(0);
-    const firstRun = readCredentials(dbPath, "gmail-a");
+    const firstRunA = readCredentials(dbPath, "gmail-a");
+    const firstRunB = readCredentials(dbPath, "gmail-b");
+    const jobsBefore = countJobs(dbPath);
+    const filesBefore = readdirSync(tempDir).sort();
 
     const second = runMigrate(tempDir);
 
     expect(second.status).toBe(0);
-    expect(readCredentials(dbPath, "gmail-a")).toEqual(firstRun);
+    expect(second.output).not.toContain("Purged plaintext Gmail tokens");
+    expect(readCredentials(dbPath, "gmail-a")).toEqual(firstRunA);
+    expect(readCredentials(dbPath, "gmail-b")).toEqual(firstRunB);
+    expect(countJobs(dbPath)).toBe(jobsBefore);
+    expect(readdirSync(tempDir).sort()).toEqual(filesBefore);
     expect(
       filesWithPrefix(tempDir, "jobs_pre_gmail_token_encryption_"),
     ).toHaveLength(1);
 
     const freshDir = await mkdtemp(join(tmpdir(), "job-ops-gmail-tokens-"));
     try {
-      expect(runMigrate(freshDir).status).toBe(0);
+      const fresh = runMigrate(freshDir);
+      expect(fresh.status).toBe(0);
+      expect(fresh.output).not.toContain("Purged plaintext Gmail tokens");
       expect(filesWithPrefix(freshDir, "jobs_pre_gmail_token_")).toEqual([]);
     } finally {
       await rm(freshDir, { recursive: true, force: true });

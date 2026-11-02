@@ -128,6 +128,33 @@ function applyUpdates(
   })();
 }
 
+type CheckpointResult = { busy: number; log: number; checkpointed: number };
+
+class IncompleteCheckpointError extends Error {
+  constructor(readonly checkpoint: CheckpointResult) {
+    super("WAL checkpoint did not complete.");
+  }
+}
+
+function checkpointTruncate(sqlite: SqliteHandle): void {
+  const [result] = sqlite.pragma("wal_checkpoint(TRUNCATE)") as [
+    CheckpointResult,
+  ];
+  if (result.busy !== 0 || result.log !== result.checkpointed) {
+    throw new IncompleteCheckpointError(result);
+  }
+}
+
+// UPDATE leaves the old plaintext in page free space, freelist pages and WAL
+// frames. Flush the WAL, rebuild the file with VACUUM, then flush the VACUUM
+// output (which lands in the WAL first) so neither file keeps the old bytes.
+// Not in WAL mode, the checkpoints are no-ops that report log = -1.
+function purgeFreedPlaintext(sqlite: SqliteHandle): void {
+  checkpointTruncate(sqlite);
+  sqlite.exec("VACUUM");
+  checkpointTruncate(sqlite);
+}
+
 export async function encryptLegacyGmailTokens(
   sqlite: SqliteHandle,
   options: { dbPath: string },
@@ -174,6 +201,20 @@ export async function encryptLegacyGmailTokens(
 
   const summary = { rowsMigrated: updates.length, backupFile };
   logger.info("Encrypted legacy Gmail tokens", summary);
+
+  // The rows are already encrypted and committed, so a failed purge only logs.
+  try {
+    purgeFreedPlaintext(sqlite);
+    logger.info("Purged plaintext Gmail tokens from database file", summary);
+  } catch (error) {
+    logger.warn("Purging plaintext Gmail tokens from database file failed", {
+      ...summary,
+      ...(error instanceof IncompleteCheckpointError
+        ? { checkpoint: error.checkpoint }
+        : {}),
+      error,
+    });
+  }
   return summary;
 }
 

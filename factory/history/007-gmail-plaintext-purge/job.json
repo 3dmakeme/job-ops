@@ -1,0 +1,41 @@
+{
+  "id": "007-gmail-plaintext-purge",
+  "title": "Gmail plaintext purge",
+  "feature": "Purge old plaintext Gmail tokens from SQLite after the encryption migration: after gmail-token-encryption.ts updates rows, remove leftover plaintext from jobs.db free pages and the WAL (for example PRAGMA wal_checkpoint(TRUNCATE) plus VACUUM, or secure_delete for that connection), only after the verified backup exists and the update has committed; idempotent, no-op when nothing was migrated, tests that the old token string is no longer present in the database file bytes, and an AGENTS.md operator note that older jobs_*.db backups still hold plaintext until retention removes them",
+  "branch": "factory/007-gmail-plaintext-purge",
+  "base": "main",
+  "worktree": "/Users/richards/Code/job-ops-factory/007-gmail-plaintext-purge",
+  "reviewers": [
+    {
+      "name": "security",
+      "agent": "fm-factory:reviewer-security",
+      "skills": [
+        "fm-factory:secure-endpoint"
+      ]
+    },
+    {
+      "name": "ux",
+      "agent": "fm-factory:reviewer-ux",
+      "browser": true
+    },
+    {
+      "name": "ui",
+      "agent": "fm-factory:reviewer-ui",
+      "browser": true
+    },
+    {
+      "name": "code",
+      "agent": "fm-factory:reviewer-code"
+    }
+  ],
+  "models": {},
+  "stage": "merged",
+  "round": 1,
+  "reviews": {
+    "security": "PASS",
+    "ux": "PASS",
+    "ui": "PASS",
+    "code": "PASS"
+  },
+  "merged": "2026-11-02"
+}
