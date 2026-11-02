@@ -40,6 +40,48 @@ const FIELDS: Array<{
   },
 ];
 
+export const JudgmentEngineSelect: React.FC<{
+  name: EngineFieldName;
+  values: JudgmentEngineValues;
+  disabled: boolean;
+}> = ({ name, values, disabled }) => {
+  const { control } = useFormContext<UpdateSettingsInput>();
+  const field = FIELDS.find((f) => f.name === name);
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+      <label htmlFor={`${name}-inline`} className="text-sm font-medium">
+        Engine: {field?.label}
+      </label>
+      <Controller
+        name={name}
+        control={control}
+        render={({ field: formField }) => (
+          <Select
+            value={formField.value ?? values[name].default}
+            onValueChange={formField.onChange}
+            disabled={disabled}
+          >
+            <SelectTrigger id={`${name}-inline`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {JUDGMENT_ENGINE_VALUES.map((engine) => (
+                <SelectItem key={engine} value={engine}>
+                  {JUDGMENT_ENGINE_LABELS[engine]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      />
+      <p className="text-xs text-muted-foreground">
+        {field?.description} With TypeSafe Jev selected, the model fields below
+        are only used as the fallback.
+      </p>
+    </div>
+  );
+};
+
 export const JudgmentEngineSection: React.FC<JudgmentEngineSectionProps> = ({
   values,
   isLoading,

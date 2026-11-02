@@ -1,6 +1,10 @@
 import { LlmModelConfiguration } from "@client/components/llmmodelconfiguration/LlmModelConfiguration";
 import { SettingsSectionFrame } from "@client/pages/settings/components/SettingsSectionFrame";
-import type { ModelValues } from "@client/pages/settings/types";
+import { JudgmentEngineSelect } from "@client/pages/settings/components/JudgmentEngineSection";
+import type {
+  JudgmentEngineValues,
+  ModelValues,
+} from "@client/pages/settings/types";
 import {
   type LlmProviderId,
   normalizeLlmProvider,
@@ -12,6 +16,7 @@ import { useFormContext } from "react-hook-form";
 
 type ModelSettingsSectionProps = {
   values: ModelValues;
+  judgmentEngines: JudgmentEngineValues;
   isLoading: boolean;
   isSaving: boolean;
   layoutMode?: "accordion" | "panel";
@@ -19,6 +24,7 @@ type ModelSettingsSectionProps = {
 
 export const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
   values,
+  judgmentEngines,
   isLoading,
   isSaving,
   layoutMode,
@@ -134,6 +140,30 @@ export const ModelSettingsSection: React.FC<ModelSettingsSectionProps> = ({
           onChange: (value) => setStringField("modelProjectSelection", value),
           error: errors.modelProjectSelection?.message as string | undefined,
         }}
+        purposeExtras={{
+          projectSelection: (
+            <JudgmentEngineSelect
+              name="projectSelectionEngine"
+              values={judgmentEngines}
+              disabled={disabled}
+            />
+          ),
+        }}
+        extraSlot={
+          <div className="space-y-3">
+            <div className="font-medium">Non-LLM judgment engines</div>
+            <p className="text-xs text-muted-foreground">
+              Tasks that TypeSafe Jev can answer instead of an LLM. Writing
+              tasks (summaries, tailoring, Ghostwriter) always use the models
+              above.
+            </p>
+            <JudgmentEngineSelect
+              name="emailRoutingEngine"
+              values={judgmentEngines}
+              disabled={disabled}
+            />
+          </div>
+        }
         purposeOverrides={{
           values: purposeOverrides,
           apiKeys: purposeApiKeys,

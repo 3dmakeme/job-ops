@@ -1699,6 +1699,7 @@ export const SettingsPage: React.FC = () => {
       activeSectionContent = (
         <ModelSettingsSection
           values={model}
+          judgmentEngines={judgmentEngines}
           isLoading={isLoading}
           isSaving={isSaving}
           layoutMode="panel"

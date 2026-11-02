@@ -77,6 +77,8 @@ type LlmModelConfigurationProps = {
   modelTailoring?: TextFieldBinding;
   modelProjectSelection?: TextFieldBinding;
   purposeOverrides?: PurposeOverrideBinding;
+  purposeExtras?: Partial<Record<LlmPurpose, React.ReactNode>>;
+  extraSlot?: React.ReactNode;
   validationSlot?: React.ReactNode;
   onCodexAuthStatusChange?: React.ComponentProps<
     typeof CodexAuthPanel
@@ -100,6 +102,8 @@ export function LlmModelConfiguration({
   modelTailoring,
   modelProjectSelection,
   purposeOverrides,
+  purposeExtras,
+  extraSlot,
   validationSlot,
   onCodexAuthStatusChange,
 }: LlmModelConfigurationProps) {
@@ -429,7 +433,8 @@ export function LlmModelConfiguration({
                           </span>
                         </div>
                       </AccordionTrigger>
-                      <AccordionContent>
+                      <AccordionContent className="space-y-3">
+                        {purposeExtras?.[purpose.id]}
                         <PurposeOverrideCard
                           key={purpose.id}
                           purpose={purpose.id}
@@ -495,6 +500,8 @@ export function LlmModelConfiguration({
               )}
             </div>
           </div>
+
+          {extraSlot}
 
           <div className="space-y-3 text-sm">
             <div className="text-xs text-muted-foreground">Resolved config</div>
