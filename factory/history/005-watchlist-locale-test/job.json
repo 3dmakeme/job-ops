@@ -1,0 +1,41 @@
+{
+  "id": "005-watchlist-locale-test",
+  "title": "Watchlist locale-independent test",
+  "feature": "Make WatchlistPage.test.tsx (\"shows new rows by default with ignore actions\") locale-independent: it expects \"May 1, 2026\" but renders \"1 May 2026\" under en_GB, and fails on unmodified main",
+  "branch": "factory/005-watchlist-locale-test",
+  "base": "main",
+  "worktree": "/Users/richards/Code/job-ops-factory/005-watchlist-locale-test",
+  "reviewers": [
+    {
+      "name": "security",
+      "agent": "fm-factory:reviewer-security",
+      "skills": [
+        "fm-factory:secure-endpoint"
+      ]
+    },
+    {
+      "name": "ux",
+      "agent": "fm-factory:reviewer-ux",
+      "browser": true
+    },
+    {
+      "name": "ui",
+      "agent": "fm-factory:reviewer-ui",
+      "browser": true
+    },
+    {
+      "name": "code",
+      "agent": "fm-factory:reviewer-code"
+    }
+  ],
+  "models": {},
+  "stage": "merged",
+  "round": 1,
+  "reviews": {
+    "security": "PASS",
+    "ux": "PASS",
+    "ui": "PASS",
+    "code": "PASS"
+  },
+  "merged": "2026-11-02"
+}
