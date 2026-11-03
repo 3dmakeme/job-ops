@@ -177,6 +177,11 @@ const openDisplaySection = async () => {
   await clickLastButtonByName(/display preferences/i);
 };
 
+const openLinkedInAlertsSection = async () => {
+  await openNavGroup(/^integrations$/i);
+  await clickLastButtonByName(/linkedin alerts/i);
+};
+
 const openEnvironmentSection = async () => {
   await openNavGroup(/^workspaces & security$/i);
   await clickLastButtonByName(/workspace access/i);
@@ -1147,6 +1152,50 @@ describe("SettingsPage", () => {
       expect.objectContaining({
         ghostwriterStopSlopEnabled: true,
       }),
+    );
+  });
+
+  it("saves the LinkedIn alerts toggle and shows it checked after reload", async () => {
+    const savedSettings = createAppSettings({
+      linkedinAlertsEnabled: { value: true, default: false, override: true },
+    });
+    vi.mocked(api.getSettings).mockResolvedValue(baseSettings);
+    vi.mocked(api.updateSettings).mockResolvedValue(savedSettings);
+
+    const { unmount } = renderPage();
+    await openLinkedInAlertsSection();
+
+    const checkbox = screen.getByLabelText(
+      /import jobs from linkedin alert emails/i,
+    );
+    expect(checkbox).not.toBeChecked();
+    expect(
+      screen.getByText(/linkedin job-alert emails from the last 7 days/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /tracking inbox/i }),
+    ).toHaveAttribute("href", "/tracking-inbox");
+
+    fireEvent.click(checkbox);
+
+    const saveButton = getSaveButton();
+    await waitFor(() => expect(saveButton).toBeEnabled());
+    fireEvent.click(saveButton);
+
+    await waitFor(() => expect(api.updateSettings).toHaveBeenCalled());
+    expect(api.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ linkedinAlertsEnabled: true }),
+    );
+    unmount();
+
+    vi.mocked(api.getSettings).mockResolvedValue(savedSettings);
+    renderPage();
+    await openLinkedInAlertsSection();
+
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText(/import jobs from linkedin alert emails/i),
+      ).toBeChecked(),
     );
   });
 

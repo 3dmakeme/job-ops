@@ -1,0 +1,16 @@
+From: LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>
+To: candidate@example.com
+Subject: "backend developer": 1 new job
+Date: Fri, 30 Oct 2026 08:00:00 +0000
+Message-ID: <alert-noid-0004@example.linkedin.com>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<html><body>
+<p>Your job alert for backend developer</p>
+<div class="card">
+  <a href="https://www.linkedin.com/comm/jobs/view/backend-developer-at-example-labs/?trackingId=xyz">Backend Developer</a>
+  <span>Example Labs</span> | <span>Leeds, England, United Kingdom</span>
+</div>
+</body></html>

@@ -25,6 +25,7 @@ import { DangerZoneSection } from "@client/pages/settings/components/DangerZoneS
 import { DisplaySettingsSection } from "@client/pages/settings/components/DisplaySettingsSection";
 import { EnvironmentSettingsSection } from "@client/pages/settings/components/EnvironmentSettingsSection";
 import { JudgmentEngineSection } from "@client/pages/settings/components/JudgmentEngineSection";
+import { LinkedInAlertsSettingsSection } from "@client/pages/settings/components/LinkedInAlertsSettingsSection";
 import { ModelSettingsSection } from "@client/pages/settings/components/ModelSettingsSection";
 import { PromptTemplatesSection } from "@client/pages/settings/components/PromptTemplatesSection";
 import { ReactiveResumeSection } from "@client/pages/settings/components/ReactiveResumeSection";
@@ -107,6 +108,7 @@ const DEFAULT_FORM_VALUES: UpdateSettingsInput = {
   adzunaAppId: "",
   adzunaAppKey: "",
   webhookSecret: "",
+  linkedinAlertsEnabled: null,
   backupEnabled: null,
   backupHour: null,
   backupMaxCount: null,
@@ -143,6 +145,7 @@ type SettingsSectionId =
   | "reactive-resume"
   | "webhooks"
   | "tracer-links"
+  | "linkedin-alerts"
   | "environment"
   | "display"
   | "backup"
@@ -270,6 +273,12 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         description: "Public URL readiness and verification state.",
         searchTerms: ["public url", "verify", "readiness", "health"],
       },
+      {
+        id: "linkedin-alerts",
+        label: "LinkedIn Alerts",
+        description: "Import jobs from LinkedIn job-alert emails.",
+        searchTerms: ["linkedin", "job alerts", "email", "imap", "inbox"],
+      },
     ],
   },
   {
@@ -385,6 +394,7 @@ const SECTION_FIELD_MAP: Record<
   ],
   webhooks: ["pipelineWebhookUrl", "jobCompleteWebhookUrl", "webhookSecret"],
   "tracer-links": [],
+  "linkedin-alerts": ["linkedinAlertsEnabled"],
   environment: [
     "ukvisajobsEmail",
     "ukvisajobsPassword",
@@ -492,6 +502,7 @@ const NULL_SETTINGS_PAYLOAD: UpdateSettingsInput = {
   adzunaAppKey: null,
   adzunaMaxJobsPerTerm: null,
   webhookSecret: null,
+  linkedinAlertsEnabled: null,
   backupEnabled: null,
   backupHour: null,
   backupMaxCount: null,
@@ -565,6 +576,7 @@ const mapSettingsToForm = (data: AppSettings): UpdateSettingsInput => ({
   adzunaAppId: data.adzunaAppId ?? "",
   adzunaAppKey: "",
   webhookSecret: "",
+  linkedinAlertsEnabled: data.linkedinAlertsEnabled.override,
   backupEnabled: data.backupEnabled.override,
   backupHour: data.backupHour.override,
   backupMaxCount: data.backupMaxCount.override,
@@ -782,6 +794,12 @@ const getDerivedSettings = (settings: AppSettings | null) => {
     profileProjects,
     maxProjectsTotal: profileProjects.length,
 
+    linkedinAlerts: {
+      linkedinAlertsEnabled: {
+        effective: settings?.linkedinAlertsEnabled?.value ?? false,
+        default: settings?.linkedinAlertsEnabled?.default ?? false,
+      },
+    },
     backup: {
       backupEnabled: {
         effective: settings?.backupEnabled?.value ?? false,
@@ -1037,6 +1055,7 @@ export const SettingsPage: React.FC = () => {
     envSettings,
     defaultResumeProjects,
     profileProjects,
+    linkedinAlerts,
     backup,
     scoring,
     judgmentEngines,
@@ -1336,6 +1355,10 @@ export const SettingsPage: React.FC = () => {
           : (data.chatStyleMaxKeywordsPerSkill ?? null),
         chatStyleLanguageMode: data.chatStyleLanguageMode ?? null,
         chatStyleManualLanguage: data.chatStyleManualLanguage ?? null,
+        linkedinAlertsEnabled: nullIfSame(
+          data.linkedinAlertsEnabled,
+          linkedinAlerts.linkedinAlertsEnabled.default,
+        ),
         backupEnabled: nullIfSame(
           data.backupEnabled,
           backup.backupEnabled.default,
@@ -1687,6 +1710,10 @@ export const SettingsPage: React.FC = () => {
           : tracerReadiness
             ? { label: "Check required", variant: "secondary" as const }
             : { label: "Not configured", variant: "secondary" as const };
+      case "linkedin-alerts":
+        return linkedinAlerts.linkedinAlertsEnabled.effective
+          ? { label: "On", variant: "outline" as const }
+          : { label: "Off", variant: "secondary" as const };
       case "environment":
         return envSettings.readable.ukvisajobsEmail ||
           envSettings.readable.adzunaAppId
@@ -1814,6 +1841,16 @@ export const SettingsPage: React.FC = () => {
           isLoading={isLoading || isTracerReadinessLoading}
           isChecking={isTracerReadinessChecking}
           onVerifyNow={handleVerifyTracerReadiness}
+          layoutMode="panel"
+        />
+      );
+      break;
+    case "linkedin-alerts":
+      activeSectionContent = (
+        <LinkedInAlertsSettingsSection
+          values={linkedinAlerts}
+          isLoading={isLoading}
+          isSaving={isSaving}
           layoutMode="panel"
         />
       );

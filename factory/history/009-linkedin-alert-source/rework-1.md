@@ -1,0 +1,6 @@
+The owner chose option 1 on the approver's escalation (decision.md): harden the LinkedIn alert parser against forged alert emails.
+
+1. Drop any listing whose URL cannot be normalised to the clean `https://www.linkedin.com/jobs/view/<id>` form (job-url.ts). Do not store links "as given" any more. This changes spec Requirement 7 and fixture (d) (the link with no derivable job id): that listing must now be dropped, and the test must assert it is dropped. Only linkedin.com hosts (including inside an encoded redirect parameter, as today) may produce a job. Non-LinkedIn hosts, lookalike hosts (for example linkedin.com.evil.example, evil.example/linkedin.com/jobs/view/1) and non-http(s) schemes must all be rejected, with tests.
+2. Cap the number of job links parsed per email (for example 50) in alert-parser.ts, in both the text and the HTML/jsdom paths, so a crafted HTML-only email cannot cause quadratic parse time. Add a test.
+3. In scanner.ts do not copy raw `error.message` into source errors for non-IMAP errors; use a generic `LinkedIn alerts: scan failed` style message and log the detail server-side (no email content, no credentials). Keep the existing IMAP error handling. Add a test.
+4. Update the AGENTS.md bullet and any fixture or test text that described storing links as given. Keep everything else unchanged. Re-run all seven CI-parity checks.

@@ -509,6 +509,7 @@ export async function runPipeline(
         const retryResult = await discoverJobsStep({
           mergedConfig: retryConfig,
           includeWatchlist: false,
+          includeLinkedInAlerts: false,
           preserveFanout: true,
           fanoutSeedJobs: discoveredJobs,
           retryChallengeUrls,

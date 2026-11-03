@@ -51,6 +51,10 @@ export type EnvSettingsValues = {
   };
 };
 
+export type LinkedInAlertsValues = {
+  linkedinAlertsEnabled: EffectiveDefault<boolean>;
+};
+
 export type BackupValues = {
   backupEnabled: EffectiveDefault<boolean>;
   backupHour: EffectiveDefault<number>;

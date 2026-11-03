@@ -312,6 +312,7 @@ export interface AppSettings {
   chatStyleManualLanguage: Resolved<ChatStyleManualLanguage>;
   chatStyleSummaryMaxWords: Resolved<number | null>;
   chatStyleMaxKeywordsPerSkill: Resolved<number | null>;
+  linkedinAlertsEnabled: Resolved<boolean>;
   backupEnabled: Resolved<boolean>;
   backupHour: Resolved<number>;
   backupMaxCount: Resolved<number>;

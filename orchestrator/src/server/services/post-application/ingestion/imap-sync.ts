@@ -147,7 +147,7 @@ function extractBody(parsed: ParsedMail): string {
 
 // mailparser would otherwise synthesize `text` from HTML (keeping link URLs);
 // the body rules below convert HTML with the same settings as Gmail instead.
-const PARSER_OPTIONS = {
+export const PARSER_OPTIONS = {
   skipHtmlToText: true,
   skipTextToHtml: true,
   skipImageLinks: true,
@@ -179,11 +179,13 @@ export function mapParsedImapMessage(
  * Greedy in-order fit of UIDs into the per-sync byte budget. Each UID is
  * charged its reported size capped at the per-message limit (the cap when the
  * size is unknown); UIDs that do not fit are skipped so later, smaller ones can.
+ * Truncated and skipped UIDs are logged as warnings.
  */
-function selectUidsWithinBudget(
+export function selectUidsWithinBudget(
+  accountKey: string,
   orderedUids: number[],
   sizes: ImapMessageSize[],
-): { selected: number[]; skipped: number[]; truncated: ImapMessageSize[] } {
+): { selected: number[]; skipped: number[] } {
   const sizeByUid = new Map(sizes.map((entry) => [entry.uid, entry.size]));
   const selected: number[] = [];
   const skipped: number[] = [];
@@ -205,7 +207,26 @@ function selectUidsWithinBudget(
       truncated.push({ uid, size });
     }
   }
-  return { selected, skipped, truncated };
+
+  for (const { uid, size } of truncated) {
+    logger.warn("IMAP message exceeds size limit; truncating", {
+      provider: "imap",
+      accountKey,
+      uid,
+      sizeBytes: size,
+      limitBytes: IMAP_MAX_MESSAGE_BYTES,
+    });
+  }
+  if (skipped.length > 0) {
+    logger.warn("IMAP sync byte budget exceeded; skipping messages", {
+      provider: "imap",
+      accountKey,
+      skippedCount: skipped.length,
+      skippedUids: skipped,
+      budgetBytes: IMAP_MAX_SYNC_BYTES,
+    });
+  }
+  return { selected, skipped };
 }
 
 /**
@@ -245,29 +266,7 @@ async function fetchInboxMessages(
       candidates = [...uids].sort((a, b) => b - a).slice(0, maxMessages);
     }
     const sizes = await client.fetchMessageSizes(candidates);
-    const { selected, skipped, truncated } = selectUidsWithinBudget(
-      candidates,
-      sizes,
-    );
-
-    for (const { uid, size } of truncated) {
-      logger.warn("IMAP message exceeds size limit; truncating", {
-        provider: "imap",
-        accountKey,
-        uid,
-        sizeBytes: size,
-        limitBytes: IMAP_MAX_MESSAGE_BYTES,
-      });
-    }
-    if (skipped.length > 0) {
-      logger.warn("IMAP sync byte budget exceeded; skipping messages", {
-        provider: "imap",
-        accountKey,
-        skippedCount: skipped.length,
-        skippedUids: skipped,
-        budgetBytes: IMAP_MAX_SYNC_BYTES,
-      });
-    }
+    const { selected } = selectUidsWithinBudget(accountKey, candidates, sizes);
 
     const messages = await client.fetchMessageSources(
       selected,
