@@ -1,0 +1,49 @@
+From: LinkedIn <jobs-listings@linkedin.com>
+To: candidate@example.com
+Subject: New jobs similar to Data Analyst
+Date: Sun, 01 Nov 2026 18:05:00 +0000
+Message-ID: <alert-html-0002@example.linkedin.com>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<!DOCTYPE html>
+<html>
+<head><title>LinkedIn job alert</title><style>.card { padding: 8px; }</style></head>
+<body>
+<table role="presentation">
+  <tr><td><h2>Your job alert for data analyst</h2></td></tr>
+  <tr>
+    <td class="card">
+      <table role="presentation">
+        <tr>
+          <td><a href="https://www.linkedin.com/comm/jobs/view/4087654321/?trackingId=Zm9v&amp;refId=x1"><img src="https://media.example.com/logo1.png" alt=""></a></td>
+          <td>
+            <a href="https://www.linkedin.com/comm/jobs/view/4087654321/?trackingId=Zm9v&amp;refId=x1">
+              Junior   Data Analyst
+            </a>
+            <p>Northwind Traders</p>
+            <p>Bristol, England, United Kingdom</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td class="card">
+      <table role="presentation">
+        <tr>
+          <td><a href="https://uk.linkedin.com/jobs/view/analytics-engineer-at-contoso-4087654322?trk=eml"><img src="https://media.example.com/logo2.png" alt=""></a></td>
+          <td>
+            <a href="https://uk.linkedin.com/jobs/view/analytics-engineer-at-contoso-4087654322?trk=eml">Analytics Engineer</a>
+            <p>Contoso &middot; Cardiff, Wales, United Kingdom</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr><td><a href="https://www.linkedin.com/comm/jobs/search?keywords=data%20analyst">See all jobs</a></td></tr>
+  <tr><td><a href="https://www.linkedin.com/comm/psettings/email-unsubscribe?id=test">Unsubscribe</a></td></tr>
+</table>
+</body>
+</html>

@@ -1,0 +1,62 @@
+From: LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>
+To: Test Candidate <candidate@example.com>
+Subject: "platform engineer": 3 new jobs
+Date: Mon, 02 Nov 2026 07:30:00 +0000
+Message-ID: <alert-multipart-0001@example.linkedin.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="ALERT-BOUNDARY-A"
+
+--ALERT-BOUNDARY-A
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+Your job alert for platform engineer
+3 new jobs match your preferences.
+
+Senior Platform Engineer
+Example Robotics
+London, England, United Kingdom
+View job: https://www.linkedin.com/comm/jobs/view/4012345678/?trackingId=aaa%3D%3D&refId=r1
+
+---------------------------------------------------------
+
+Data   Engineer
+Sample Analytics Ltd
+Manchester, England, United Kingdom
+View job: https://www.linkedin.com/comm/jobs/view/4012345679/?trackingId=bbb&refId=r2
+
+---------------------------------------------------------
+
+Site Reliability Engineer
+Demo Cloud
+London Area, United Kingdom
+View job: https://www.linkedin.com/comm/jobs/view/4012345680/?trackingId=ccc
+
+---------------------------------------------------------
+
+Senior Platform Engineer
+Example Robotics
+London, England, United Kingdom
+View job: https://www.linkedin.com/comm/jobs/view/4012345678/?trackingId=ddd
+
+---------------------------------------------------------
+
+See all jobs: https://www.linkedin.com/comm/jobs/search?keywords=platform%20engineer
+
+Unsubscribe: https://www.linkedin.com/comm/psettings/email-unsubscribe?id=test
+
+--ALERT-BOUNDARY-A
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: 7bit
+
+<html><body>
+<h1>Your job alert for platform engineer</h1>
+<table>
+<tr><td><a href="https://www.linkedin.com/comm/jobs/view/4012345678/?trackingId=aaa">Senior Platform Engineer</a><p>Example Robotics &middot; London, England, United Kingdom</p></td></tr>
+<tr><td><a href="https://www.linkedin.com/comm/jobs/view/4012345679/?trackingId=bbb">Data Engineer</a><p>Sample Analytics Ltd &middot; Manchester, England, United Kingdom</p></td></tr>
+<tr><td><a href="https://www.linkedin.com/comm/jobs/view/4012345680/?trackingId=ccc">Site Reliability Engineer</a><p>Demo Cloud &middot; London Area, United Kingdom</p></td></tr>
+<tr><td><a href="https://www.linkedin.com/comm/jobs/view/4012345678/?trackingId=ddd">Senior Platform Engineer</a><p>Example Robotics &middot; London, England, United Kingdom</p></td></tr>
+</table>
+</body></html>
+
+--ALERT-BOUNDARY-A--

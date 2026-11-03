@@ -9,6 +9,7 @@ import {
   readHiringCafeBrowserPage,
 } from "@server/services/hiring-cafe-browser";
 import { withHostedUsageReservation } from "@server/services/hosted-usage";
+import { scanLinkedInAlertEmails } from "@server/services/linkedin-alerts/scanner";
 import { resolveNearbyPlaceNames } from "@server/services/proximity-search";
 import {
   getPrivateCloudflareCookieStorageDir,
@@ -29,6 +30,7 @@ import {
 } from "@shared/location-domain.js";
 import { formatCountryLabel } from "@shared/location-support.js";
 import { normalizeStringArray } from "@shared/normalize-string-array.js";
+import { settingsRegistry } from "@shared/settings-registry";
 import {
   type CreateJobInput,
   deriveExtractorLimits,
@@ -159,6 +161,7 @@ function buildLocationEvidence(args: {
 export async function discoverJobsStep(args: {
   mergedConfig: PipelineConfig;
   includeWatchlist?: boolean;
+  includeLinkedInAlerts?: boolean;
   preserveFanout?: boolean;
   fanoutSeedJobs?: CreateJobInput[];
   retryChallengeUrls?: Record<string, string>;
@@ -185,6 +188,12 @@ export async function discoverJobsStep(args: {
 
   const settings = await settingsRepo.getAllSettings();
   const registry = await getExtractorRegistry();
+  const includeLinkedInAlerts =
+    args.includeLinkedInAlerts !== false &&
+    (settingsRegistry.linkedinAlertsEnabled.parse(
+      settings.linkedinAlertsEnabled,
+    ) ??
+      settingsRegistry.linkedinAlertsEnabled.default());
 
   const searchTermsSetting = settings.searchTerms;
   let searchTerms: string[] = [];
@@ -496,7 +505,9 @@ export async function discoverJobsStep(args: {
   }
 
   const totalSources =
-    sourceTasks.length + (watchlistSelectedSources.length > 0 ? 1 : 0);
+    sourceTasks.length +
+    (watchlistSelectedSources.length > 0 ? 1 : 0) +
+    (includeLinkedInAlerts ? 1 : 0);
   let completedSources = 0;
   let successfulSearchUnits = 0;
 
@@ -515,6 +526,9 @@ export async function discoverJobsStep(args: {
         ...(watchlistSelectedSources.length > 0
           ? [{ id: "watchlist", unitsPerRole: locationCount }]
           : []),
+        ...(includeLinkedInAlerts
+          ? [{ id: "linkedin-alerts", unitsPerRole: locationCount }]
+          : []),
       ],
       locations:
         locationIntent.cityLocations.length > 0
@@ -523,11 +537,13 @@ export async function discoverJobsStep(args: {
       sources: [
         ...compatibleSources,
         ...(watchlistSelectedSources.length > 0 ? ["watchlist"] : []),
+        ...(includeLinkedInAlerts ? ["linkedin-alerts"] : []),
       ],
       locationCount,
       sourceCount:
         compatibleSources.length +
-        (watchlistSelectedSources.length > 0 ? 1 : 0),
+        (watchlistSelectedSources.length > 0 ? 1 : 0) +
+        (includeLinkedInAlerts ? 1 : 0),
       capacity: DISCOVERY_CONCURRENCY,
     });
   }
@@ -677,6 +693,41 @@ export async function discoverJobsStep(args: {
             watchlistResult.selectedSourceCount
         ) {
           throw new Error(`All sources failed: ${sourceErrors.join("; ")}`);
+        }
+      }
+
+      if (includeLinkedInAlerts && !args.shouldCancel?.()) {
+        progressHelpers.startFanoutTask("linkedin-alerts");
+        progressHelpers.startSource(
+          "linkedin-alerts",
+          completedSources,
+          totalSources,
+          {
+            detail: "LinkedIn alerts: reading inbox...",
+          },
+        );
+        const linkedInAlerts = await scanLinkedInAlertEmails();
+        completedSources += 1;
+        progressHelpers.completeSource(completedSources, totalSources);
+
+        const linkedInJobs: CreateJobInput[] = linkedInAlerts.jobs.map(
+          (job) => ({
+            source: "linkedin",
+            title: job.title,
+            employer: job.company,
+            location: job.location,
+            jobUrl: job.jobUrl,
+            sourceJobId: job.sourceJobId,
+          }),
+        );
+        discoveredJobs.push(...linkedInJobs);
+        settledJobs.push(...linkedInJobs);
+        progressHelpers.settleFanoutTask("linkedin-alerts", "complete");
+        updateFanoutResults();
+        if (linkedInAlerts.error) {
+          sourceErrors.push(linkedInAlerts.error);
+        } else {
+          successfulSearchUnits += 1;
         }
       }
 

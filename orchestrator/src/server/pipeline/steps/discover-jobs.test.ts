@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { runWithRequestContext } from "@infra/request-context";
 import type { PipelineConfig } from "@shared/types";
 import type { ExtractorRuntimeContext } from "@shared/types/extractors";
@@ -6,6 +9,37 @@ import { getProgress, resetProgress, subscribeToProgress } from "../progress";
 import { discoverJobsStep } from "./discover-jobs";
 
 const hiringCafeFetch = vi.hoisted(() => vi.fn());
+const imapMocks = vi.hoisted(() => ({
+  client: {
+    connect: vi.fn(),
+    openInboxReadOnly: vi.fn(),
+    searchUidsSinceFrom: vi.fn(),
+    fetchMessageSizes: vi.fn(),
+    fetchMessageSources: vi.fn(),
+    close: vi.fn(),
+  },
+  createImapClient: vi.fn(),
+  getPostApplicationIntegration: vi.fn(),
+  decryptSecret: vi.fn(),
+}));
+
+vi.mock(
+  "@server/services/post-application/ingestion/imap-client",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@server/services/post-application/ingestion/imap-client")
+    >()),
+    createImapClient: imapMocks.createImapClient,
+  }),
+);
+
+vi.mock("@server/repositories/post-application-integrations", () => ({
+  getPostApplicationIntegration: imapMocks.getPostApplicationIntegration,
+}));
+
+vi.mock("@infra/credential-crypto", () => ({
+  decryptSecret: imapMocks.decryptSecret,
+}));
 
 vi.mock("impit", () => ({
   Impit: class {
@@ -1497,5 +1531,233 @@ describe("discoverJobsStep", () => {
     await expect(getExistingJobUrls()).resolves.toEqual([
       "https://example.com/existing",
     ]);
+  });
+
+  describe("LinkedIn alerts source", () => {
+    const fixturesDir = join(
+      dirname(fileURLToPath(import.meta.url)),
+      "../../services/linkedin-alerts/__fixtures__",
+    );
+    const berlinAlert = Buffer.from(
+      [
+        "From: jobalerts-noreply@linkedin.com",
+        "Content-Type: text/plain; charset=utf-8",
+        "",
+        "Platform Engineer",
+        "Berlin Robotics",
+        "Berlin, Germany",
+        "View job: https://www.linkedin.com/comm/jobs/view/4055555555/?trackingId=x",
+      ].join("\r\n"),
+    );
+    const sourcesByUid: Record<number, Buffer> = {
+      101: readFileSync(join(fixturesDir, "multipart-alert.eml")),
+      102: berlinAlert,
+    };
+
+    const jobspyManifest = () => ({
+      id: "jobspy",
+      displayName: "JobSpy",
+      providesSources: ["indeed"],
+      run: vi.fn().mockResolvedValue({
+        success: true,
+        jobs: [
+          {
+            source: "indeed",
+            title: "Extractor Engineer",
+            employer: "Extractor Co",
+            jobUrl: "https://example.com/extractor",
+            location: "London, United Kingdom",
+          },
+        ],
+      }),
+    });
+
+    async function arrange(settings: Record<string, string>) {
+      const settingsRepo = await import("@server/repositories/settings");
+      const registryModule = await import("@server/extractors/registry");
+      const manifest = jobspyManifest();
+      vi.mocked(settingsRepo.getAllSettings).mockResolvedValue({
+        searchTerms: JSON.stringify(["engineer"]),
+        jobspyCountryIndeed: "united kingdom",
+        ...settings,
+      } as any);
+      vi.mocked(registryModule.getExtractorRegistry).mockResolvedValue({
+        manifests: new Map([["jobspy", manifest as any]]),
+        manifestBySource: new Map([["indeed", manifest as any]]),
+        availableSources: ["indeed"],
+      } as any);
+    }
+
+    beforeEach(() => {
+      imapMocks.createImapClient.mockReturnValue(imapMocks.client);
+      imapMocks.getPostApplicationIntegration.mockResolvedValue({
+        id: "integration-1",
+        provider: "imap",
+        accountKey: "default",
+        credentials: {
+          host: "imap.example.com",
+          port: 993,
+          tls: true,
+          username: "candidate@example.com",
+          passwordEncrypted: "enc:v1:secret",
+        },
+      });
+      imapMocks.decryptSecret.mockResolvedValue("imap-password");
+      imapMocks.client.connect.mockResolvedValue(undefined);
+      imapMocks.client.close.mockResolvedValue(undefined);
+      imapMocks.client.openInboxReadOnly.mockResolvedValue({
+        uidValidity: "1",
+      });
+      imapMocks.client.searchUidsSinceFrom.mockResolvedValue([101, 102]);
+      imapMocks.client.fetchMessageSizes.mockImplementation(
+        async (uids: number[]) => uids.map((uid) => ({ uid, size: 2048 })),
+      );
+      imapMocks.client.fetchMessageSources.mockImplementation(
+        async (uids: number[]) =>
+          uids.map((uid) => ({ uid, source: sourcesByUid[uid] })),
+      );
+    });
+
+    it("makes no IMAP connection and adds no source when the setting is unset", async () => {
+      await arrange({});
+
+      const result = await discoverJobsStep({
+        mergedConfig: { ...baseConfig, sources: ["indeed"] },
+      });
+
+      expect(imapMocks.getPostApplicationIntegration).not.toHaveBeenCalled();
+      expect(imapMocks.createImapClient).not.toHaveBeenCalled();
+      expect(getProgress().crawlingSourcesTotal).toBe(1);
+      expect(getProgress().fanout?.sources).toEqual(["indeed"]);
+      expect(result.discoveredJobs.map((job) => job.title)).toEqual([
+        "Extractor Engineer",
+      ]);
+      expect(result.sourceErrors).toEqual([]);
+    });
+
+    it("makes no IMAP connection when the setting is off", async () => {
+      await arrange({ linkedinAlertsEnabled: "0" });
+
+      await discoverJobsStep({
+        mergedConfig: { ...baseConfig, sources: ["indeed"] },
+      });
+
+      expect(imapMocks.createImapClient).not.toHaveBeenCalled();
+      expect(getProgress().crawlingSourcesTotal).toBe(1);
+    });
+
+    it("skips the scan when the caller excludes it", async () => {
+      await arrange({ linkedinAlertsEnabled: "1" });
+
+      await discoverJobsStep({
+        mergedConfig: { ...baseConfig, sources: ["indeed"] },
+        includeLinkedInAlerts: false,
+      });
+
+      expect(imapMocks.createImapClient).not.toHaveBeenCalled();
+      expect(getProgress().crawlingSourcesTotal).toBe(1);
+    });
+
+    it("adds alert listings as LinkedIn jobs through the location and blocked-company filters", async () => {
+      await arrange({
+        linkedinAlertsEnabled: "1",
+        blockedCompanyKeywords: JSON.stringify(["demo cloud"]),
+      });
+      const details: Array<string | undefined> = [];
+      const unsubscribe = subscribeToProgress((progress) => {
+        details.push(progress.detail);
+      });
+
+      const result = await discoverJobsStep({
+        mergedConfig: { ...baseConfig, sources: ["indeed"] },
+      });
+      unsubscribe();
+
+      expect(imapMocks.createImapClient).toHaveBeenCalledTimes(1);
+      expect(getProgress().crawlingSourcesTotal).toBe(2);
+      expect(getProgress().crawlingSourcesCompleted).toBe(2);
+      expect(getProgress().fanout?.sources).toEqual([
+        "indeed",
+        "linkedin-alerts",
+      ]);
+      expect(details).toContain("LinkedIn alerts: reading inbox...");
+      expect(result.sourceErrors).toEqual([]);
+      // Berlin is outside the location intent; Demo Cloud is blocked.
+      expect(result.discoveredJobs).toEqual([
+        expect.objectContaining({ title: "Extractor Engineer" }),
+        expect.objectContaining({
+          source: "linkedin",
+          title: "Senior Platform Engineer",
+          employer: "Example Robotics",
+          location: "London, England, United Kingdom",
+          jobUrl: "https://www.linkedin.com/jobs/view/4012345678",
+          sourceJobId: "4012345678",
+        }),
+        expect.objectContaining({
+          source: "linkedin",
+          title: "Data Engineer",
+          employer: "Sample Analytics Ltd",
+          location: "Manchester, England, United Kingdom",
+          jobUrl: "https://www.linkedin.com/jobs/view/4012345679",
+          sourceJobId: "4012345679",
+        }),
+      ]);
+    });
+
+    it("runs as the only source when no extractors are selected", async () => {
+      await arrange({ linkedinAlertsEnabled: "1" });
+
+      const result = await discoverJobsStep({
+        mergedConfig: { ...baseConfig, sources: [] },
+      });
+
+      expect(getProgress().crawlingSourcesTotal).toBe(1);
+      expect(result.discoveredJobs.map((job) => job.sourceJobId)).toEqual([
+        "4012345678",
+        "4012345679",
+        "4012345680",
+      ]);
+    });
+
+    it("records a connection failure as a source error without failing the run", async () => {
+      await arrange({ linkedinAlertsEnabled: "1" });
+      const { ImapConnectionError } = await import(
+        "@server/services/post-application/ingestion/imap-client"
+      );
+      imapMocks.client.connect.mockRejectedValue(
+        new ImapConnectionError(
+          "Could not reach the IMAP server at imap.example.com:993.",
+          "ECONNREFUSED",
+        ),
+      );
+
+      const result = await discoverJobsStep({
+        mergedConfig: { ...baseConfig, sources: ["indeed"] },
+      });
+
+      expect(result.sourceErrors).toEqual([
+        "LinkedIn alerts: Could not reach the IMAP server at imap.example.com:993.",
+      ]);
+      expect(result.discoveredJobs.map((job) => job.title)).toEqual([
+        "Extractor Engineer",
+      ]);
+      expect(imapMocks.client.close).toHaveBeenCalledTimes(1);
+    });
+
+    it("records a missing IMAP account as a source error without failing the run", async () => {
+      await arrange({ linkedinAlertsEnabled: "1" });
+      imapMocks.getPostApplicationIntegration.mockResolvedValue(null);
+
+      const result = await discoverJobsStep({
+        mergedConfig: { ...baseConfig, sources: [] },
+      });
+
+      expect(result).toEqual({
+        discoveredJobs: [],
+        sourceErrors: ["LinkedIn alerts: no IMAP account connected"],
+        pendingChallenges: [],
+      });
+      expect(imapMocks.createImapClient).not.toHaveBeenCalled();
+    });
   });
 });
