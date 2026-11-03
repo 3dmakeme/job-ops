@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isLinkedInJobLink, normalizeLinkedInJobUrl } from "./job-url";
+import { normalizeLinkedInJobUrl } from "./job-url";
 
 const CLEAN = "https://www.linkedin.com/jobs/view/123";
 
@@ -28,55 +28,37 @@ describe("normalizeLinkedInJobUrl", () => {
     });
   });
 
-  it("keeps a non-LinkedIn URL exactly as given, trimmed", () => {
-    expect(
-      normalizeLinkedInJobUrl("  https://careers.example.com/jobs/42?ref=li  "),
-    ).toEqual({ jobUrl: "https://careers.example.com/jobs/42?ref=li" });
-  });
-
-  it("keeps a LinkedIn job link without a derivable id as given", () => {
-    const raw =
-      "https://www.linkedin.com/comm/jobs/view/backend-developer/?trackingId=x";
-    expect(normalizeLinkedInJobUrl(raw)).toEqual({ jobUrl: raw });
-  });
-
-  it("does not trust job paths on look-alike hosts", () => {
-    const raw = "https://linkedin.com.example.net/jobs/view/123";
-    expect(normalizeLinkedInJobUrl(raw)).toEqual({ jobUrl: raw });
-    expect(isLinkedInJobLink(raw)).toBe(false);
-  });
-
   it.each([
-    "javascript:alert(1)",
-    "data:text/html,hi",
-    "mailto:jobs@linkedin.com",
-    "not a url",
-  ])("rejects %s", (raw) => {
+    ["a non-LinkedIn job page", "https://careers.example.com/jobs/view/123"],
+    ["a look-alike host", "https://linkedin.com.evil.example/jobs/view/123"],
+    ["a look-alike domain", "https://evillinkedin.com/jobs/view/123"],
+    [
+      "linkedin.com in the path of another host",
+      "https://evil.example/linkedin.com/jobs/view/1",
+    ],
+    [
+      "linkedin.com in the user info",
+      "https://www.linkedin.com@evil.example/jobs/view/123",
+    ],
+    [
+      "a redirect wrapper around a non-LinkedIn page",
+      `https://www.linkedin.com/redir?url=${encodeURIComponent("https://evil.example/jobs/view/123")}`,
+    ],
+    [
+      "a LinkedIn job link without a job id",
+      "https://www.linkedin.com/comm/jobs/view/backend-developer/?trackingId=x",
+    ],
+    ["another LinkedIn page", "https://www.linkedin.com/comm/jobs/search?k=x"],
+    ["a javascript: URL", "javascript:alert(1)"],
+    ["a data: URL", "data:text/html,hi"],
+    ["a mailto: URL", "mailto:jobs@linkedin.com"],
+    ["an ftp: URL", "ftp://www.linkedin.com/jobs/view/123"],
+    [
+      "a non-http(s) redirect value",
+      `https://click.example.com/r?u=${encodeURIComponent("javascript:void('/jobs/view/123')")}`,
+    ],
+    ["text that is not a URL", "not a url"],
+  ])("rejects %s", (_label, raw) => {
     expect(normalizeLinkedInJobUrl(raw)).toBeNull();
-    expect(isLinkedInJobLink(raw)).toBe(false);
-  });
-
-  it("ignores a redirect value that is not an http(s) URL", () => {
-    const raw = `https://click.example.com/r?u=${encodeURIComponent("javascript:void('/jobs/view/123')")}`;
-    expect(normalizeLinkedInJobUrl(raw)).toEqual({ jobUrl: raw });
-  });
-});
-
-describe("isLinkedInJobLink", () => {
-  it("recognises direct and wrapped LinkedIn job links", () => {
-    expect(
-      isLinkedInJobLink("https://www.linkedin.com/comm/jobs/view/no-id/"),
-    ).toBe(true);
-    expect(
-      isLinkedInJobLink(
-        `https://click.example.com/r?u=${encodeURIComponent("https://www.linkedin.com/jobs/view/9")}`,
-      ),
-    ).toBe(true);
-  });
-
-  it("does not treat other LinkedIn links as job links", () => {
-    expect(
-      isLinkedInJobLink("https://www.linkedin.com/comm/jobs/search?keywords=x"),
-    ).toBe(false);
   });
 });

@@ -1,10 +1,9 @@
 // `/jobs/view/<id>`, `/comm/jobs/view/<id>` or `/jobs/view/<slug>-<id>`.
 const JOB_VIEW_PATH = /^\/(?:comm\/)?jobs\/view\/(?:[^/]+-)?(\d+)\/?$/;
-const JOB_VIEW_SEGMENT = /\/jobs\/view\//;
 
 export type NormalizedLinkedInJobUrl = {
   jobUrl: string;
-  sourceJobId?: string;
+  sourceJobId: string;
 };
 
 function parseHttpUrl(value: string): URL | null {
@@ -31,22 +30,11 @@ function candidateUrls(url: URL): URL[] {
 }
 
 /**
- * Whether the link points at a LinkedIn job page, directly or through a
- * redirect wrapper, even when no job id can be derived from it.
- */
-export function isLinkedInJobLink(raw: string): boolean {
-  const url = parseHttpUrl(raw);
-  if (!url) return false;
-  return candidateUrls(url).some(
-    (candidate) =>
-      isLinkedInHost(candidate) && JOB_VIEW_SEGMENT.test(candidate.pathname),
-  );
-}
-
-/**
- * Clean `https://www.linkedin.com/jobs/view/<id>` form when a job id can be
- * derived, otherwise the trimmed link as given. `null` for anything that is
- * not an http(s) URL.
+ * Clean `https://www.linkedin.com/jobs/view/<id>` form of a LinkedIn job
+ * link, given directly or inside a redirect wrapper's query value. `null` for
+ * anything else: no derivable job id, a host that is not linkedin.com or one
+ * of its subdomains, or a scheme other than http(s). Links are never kept as
+ * given, so a forged alert cannot point a job at another site.
  */
 export function normalizeLinkedInJobUrl(
   raw: string,
@@ -63,5 +51,5 @@ export function normalizeLinkedInJobUrl(
       };
     }
   }
-  return { jobUrl: raw.trim() };
+  return null;
 }
