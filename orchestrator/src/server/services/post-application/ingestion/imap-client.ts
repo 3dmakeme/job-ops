@@ -29,6 +29,7 @@ export interface ImapClient {
   connect(): Promise<void>;
   openInboxReadOnly(): Promise<{ uidValidity: string }>;
   searchUidsSince(since: Date): Promise<number[]>;
+  searchUidsSinceFrom(since: Date, from: string): Promise<number[]>;
   searchUidsAfter(lastUid: number): Promise<number[]>;
   fetchMessageSizes(uids: number[]): Promise<ImapMessageSize[]>;
   fetchMessageSources(
@@ -121,6 +122,15 @@ export function createImapClient(config: ImapConnectionConfig): ImapClient {
     async searchUidsSince(since: Date) {
       try {
         const uids = await client.search({ since }, { uid: true });
+        return uids || [];
+      } catch (error) {
+        throw toImapError(error, "IMAP server search failed.");
+      }
+    },
+
+    async searchUidsSinceFrom(since: Date, from: string) {
+      try {
+        const uids = await client.search({ since, from }, { uid: true });
         return uids || [];
       } catch (error) {
         throw toImapError(error, "IMAP server search failed.");

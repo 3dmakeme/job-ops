@@ -176,6 +176,32 @@ describe("imap client", () => {
     expect(error.code).toBe("EPIPE");
   });
 
+  it("searches UIDs since a date from a sender", async () => {
+    const since = new Date("2026-10-26T00:00:00.000Z");
+    mocks.instance.search.mockResolvedValueOnce([3, 7]);
+
+    await expect(
+      createImapClient(config).searchUidsSinceFrom(since, "linkedin.com"),
+    ).resolves.toEqual([3, 7]);
+    expect(mocks.instance.search).toHaveBeenCalledWith(
+      { since, from: "linkedin.com" },
+      { uid: true },
+    );
+  });
+
+  it("maps a search-since-from failure to a connection error", async () => {
+    mocks.instance.search.mockRejectedValueOnce(
+      Object.assign(new Error("BAD search"), { code: "EPIPE" }),
+    );
+
+    const error = await createImapClient(config)
+      .searchUidsSinceFrom(new Date(), "linkedin.com")
+      .catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ImapConnectionError);
+    expect(error.message).toBe("IMAP server search failed.");
+  });
+
   it("exports a 1 MiB per-message cap and a 32 MiB per-sync budget", () => {
     expect(IMAP_MAX_MESSAGE_BYTES).toBe(1024 * 1024);
     expect(IMAP_MAX_SYNC_BYTES).toBe(32 * 1024 * 1024);
