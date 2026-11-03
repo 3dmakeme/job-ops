@@ -1,0 +1,12 @@
+VERDICT: PASS
+
+## Findings
+None.
+
+## Notes
+1. **Round 1 notes are addressed. All three were hardening items the owner asked for in rework-1.**
+   - Note 1, forged alert links: fixed. `orchestrator/src/server/services/linkedin-alerts/job-url.ts` now returns `null` for anything that does not normalise to `https://www.linkedin.com/jobs/view/<id>`, and `alert-parser.ts:214-215` drops those listings. Stored URLs are always built from a fixed origin plus a `\d+` id. A redirect wrapper on any host can only produce that clean LinkedIn URL, so it cannot point a job at another site. The host check is an exact match or a `.linkedin.com` suffix on `URL.hostname`, so look-alike hosts such as `linkedin.com.evil.example` and `evil.example/linkedin.com/...` fail, and only http(s) is accepted. A forged sender can still add jobs with a title and company the attacker chooses, but they link only to real LinkedIn job pages and are rendered as React text. That risk is acceptable for this feature.
+   - Note 2, parse cost: fixed. `LINKEDIN_ALERT_MAX_JOB_LINKS` (100) caps job anchors in the HTML path (`alert-parser.ts:150`) and listings in the text path (`:109`). `MAX_CARD_DEPTH` (10) caps the ancestor climb. The quadratic part is now bounded at about 100 x 100 x 10 per email, on top of the existing 1 MiB / 32 MiB caps.
+   - Note 3, error leakage: fixed. `scanner.ts:116-129` copies the message into source errors only for `ImapAuthenticationError` / `ImapConnectionError`. Their messages are fixed strings from `toImapError` with no server text. Everything else becomes `LinkedIn alerts: scan failed`, and the detail is logged through `sanitizeUnknown`.
+2. **Text-path cap is on listings, not raw links.** In `parseTextListings`, lines with non-job URLs don't count toward the cap. The loop is linear in the 1 MiB body, so this is not a DoS concern.
+3. **secure-endpoint checklist: no concerns. Checked items 1-13.** No new endpoint. The setting goes through the existing tenant-scoped settings route with a zod boolean. The scan uses the tenant-scoped `getPostApplicationIntegration` and a read-only INBOX, and writes no integration state. There is no SQL, shell or file-path use of email content. Errors are sanitized (see 1). The change needs no new grants, and no secrets or new dependencies are added. Items 4, 12 and 13 don't apply: there is no impersonation, the app is not Next.js, and nothing is unsafely deserialised.

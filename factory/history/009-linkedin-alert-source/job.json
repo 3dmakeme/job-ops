@@ -1,0 +1,41 @@
+{
+  "id": "009-linkedin-alert-source",
+  "title": "LinkedIn alert emails source",
+  "feature": "LinkedIn job-alert emails as a jobs source: via the existing IMAP provider, scan the connected inbox for LinkedIn job alert/notification emails (sender linkedin.com job alerts), parse the job listings in them (title, company, location, job URL) and add them as discovered jobs through the normal job ingestion path (dedupe by job URL, so repeats and existing jobs are not duplicated). Scan only the previous 7 days of mail (a fixed 7-day lookback for this source, independent of the general IMAP searchDays default of 90). Read-only on the mailbox, no LinkedIn scraping or login, no auto-apply, reuse the 1 MiB/32 MiB IMAP limits, tests with sample alert email fixtures, and a setting to turn it on or off (default off). Jobs then flow through normal scoring.",
+  "branch": "factory/009-linkedin-alert-source",
+  "base": "main",
+  "worktree": "/Users/richards/Code/job-ops-factory/009-linkedin-alert-source",
+  "reviewers": [
+    {
+      "name": "security",
+      "agent": "fm-factory:reviewer-security",
+      "skills": [
+        "fm-factory:secure-endpoint"
+      ]
+    },
+    {
+      "name": "ux",
+      "agent": "fm-factory:reviewer-ux",
+      "browser": true
+    },
+    {
+      "name": "ui",
+      "agent": "fm-factory:reviewer-ui",
+      "browser": true
+    },
+    {
+      "name": "code",
+      "agent": "fm-factory:reviewer-code"
+    }
+  ],
+  "models": {},
+  "stage": "merged",
+  "round": 2,
+  "reviews": {
+    "security": "PASS",
+    "ux": "PASS",
+    "ui": "PASS",
+    "code": "PASS"
+  },
+  "merged": "2026-11-03"
+}
