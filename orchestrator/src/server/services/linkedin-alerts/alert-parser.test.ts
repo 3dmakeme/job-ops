@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { PARSER_OPTIONS } from "../post-application/ingestion/imap-sync";
 import {
   isLinkedInAlertSender,
+  LINKEDIN_ALERT_MAX_JOB_LINKS,
   LINKEDIN_ALERT_SENDERS,
   parseLinkedInAlertEmail,
 } from "./alert-parser";
@@ -89,18 +90,115 @@ describe("parseLinkedInAlertEmail", () => {
     expect(isLinkedInAlertSender(parsed)).toBe(false);
   });
 
-  it("keeps a job link without a derivable id as given, fixture (d)", async () => {
+  it("drops a job link without a derivable id, fixture (d)", async () => {
     const parsed = await parse(fixture("no-job-id-alert.eml"));
 
-    expect(parseLinkedInAlertEmail(parsed)).toEqual([
-      {
-        title: "Backend Developer",
-        company: "Example Labs",
-        location: "Leeds, England, United Kingdom",
-        jobUrl:
-          "https://www.linkedin.com/comm/jobs/view/backend-developer-at-example-labs/?trackingId=xyz",
-      },
+    expect(isLinkedInAlertSender(parsed)).toBe(true);
+    expect(parseLinkedInAlertEmail(parsed)).toEqual([]);
+  });
+
+  it("drops forged listings that point outside LinkedIn job pages", async () => {
+    const text = await parse(
+      message(
+        [
+          "From: jobalerts-noreply@linkedin.com",
+          "Content-Type: text/plain; charset=utf-8",
+        ],
+        [
+          "Phishing Engineer",
+          "Evil Corp",
+          "View job: https://evil.example/linkedin.com/jobs/view/1",
+          "",
+          "Look-alike Engineer",
+          "Evil Corp",
+          "View job: https://linkedin.com.evil.example/jobs/view/2",
+          "",
+          "Real Engineer",
+          "Acme",
+          "View job: https://www.linkedin.com/jobs/view/3/",
+        ].join("\r\n"),
+      ),
+    );
+    const html = await parse(
+      message(
+        [
+          "From: jobalerts-noreply@linkedin.com",
+          "Content-Type: text/html; charset=utf-8",
+        ],
+        [
+          '<div><a href="https://careers.evil.example/jobs/view/4">Phishing Engineer</a><p>Evil Corp</p></div>',
+          '<div><a href="https://www.linkedin.com/jobs/view/5">Real Engineer</a><p>Acme</p></div>',
+        ].join(""),
+      ),
+    );
+
+    expect(parseLinkedInAlertEmail(text).map((job) => job.jobUrl)).toEqual([
+      "https://www.linkedin.com/jobs/view/3",
     ]);
+    expect(parseLinkedInAlertEmail(html).map((job) => job.jobUrl)).toEqual([
+      "https://www.linkedin.com/jobs/view/5",
+    ]);
+  });
+
+  it("reads at most LINKEDIN_ALERT_MAX_JOB_LINKS job links from text", async () => {
+    const blocks = Array.from(
+      { length: LINKEDIN_ALERT_MAX_JOB_LINKS + 20 },
+      (_, index) =>
+        `Engineer ${index}\r\nAcme\r\nView job: https://www.linkedin.com/jobs/view/${index + 1}/`,
+    );
+    const parsed = await parse(
+      message(
+        [
+          "From: jobalerts-noreply@linkedin.com",
+          "Content-Type: text/plain; charset=utf-8",
+        ],
+        blocks.join("\r\n\r\n"),
+      ),
+    );
+
+    const jobs = parseLinkedInAlertEmail(parsed);
+    expect(jobs).toHaveLength(LINKEDIN_ALERT_MAX_JOB_LINKS);
+    expect(jobs.at(-1)?.sourceJobId).toBe(String(LINKEDIN_ALERT_MAX_JOB_LINKS));
+  });
+
+  it("reads at most LINKEDIN_ALERT_MAX_JOB_LINKS job links from HTML and stays fast", async () => {
+    const cards = Array.from(
+      { length: 5000 },
+      (_, index) =>
+        `<div><a href="https://www.linkedin.com/jobs/view/${index + 1}">Engineer ${index}</a><p>Acme</p></div>`,
+    );
+    const parsed = await parse(
+      message(
+        [
+          "From: jobalerts-noreply@linkedin.com",
+          "Content-Type: text/html; charset=utf-8",
+        ],
+        `<div>${cards.join("")}</div>`,
+      ),
+    );
+
+    const started = performance.now();
+    const jobs = parseLinkedInAlertEmail(parsed);
+    const elapsedMs = performance.now() - started;
+
+    expect(jobs).toHaveLength(LINKEDIN_ALERT_MAX_JOB_LINKS);
+    expect(jobs[0]).toMatchObject({ title: "Engineer 0", company: "Acme" });
+    expect(elapsedMs).toBeLessThan(5000);
+  });
+
+  it("does not climb more than a few levels to find a card", async () => {
+    const depth = 50;
+    const parsed = await parse(
+      message(
+        [
+          "From: jobalerts-noreply@linkedin.com",
+          "Content-Type: text/html; charset=utf-8",
+        ],
+        `<section><p>Acme</p>${"<div>".repeat(depth)}<a href="https://www.linkedin.com/jobs/view/1">Engineer</a>${"</div>".repeat(depth)}</section>`,
+      ),
+    );
+
+    expect(parseLinkedInAlertEmail(parsed)).toEqual([]);
   });
 
   it("matches allowlisted senders case-insensitively", async () => {
@@ -114,7 +212,7 @@ describe("parseLinkedInAlertEmail", () => {
     expect(isLinkedInAlertSender(parsed)).toBe(true);
   });
 
-  it("drops listings without a company, title or usable link", async () => {
+  it("drops listings without a company or title", async () => {
     const parsed = await parse(
       message(
         [

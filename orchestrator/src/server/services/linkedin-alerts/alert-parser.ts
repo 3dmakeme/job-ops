@@ -1,7 +1,7 @@
 import { normalizeWhitespace } from "@shared/utils/string";
 import { JSDOM } from "jsdom";
 import type { ParsedMail } from "mailparser";
-import { isLinkedInJobLink, normalizeLinkedInJobUrl } from "./job-url";
+import { normalizeLinkedInJobUrl } from "./job-url";
 
 /** Senders whose mail is read as a LinkedIn job alert. */
 export const LINKEDIN_ALERT_SENDERS: readonly string[] = [
@@ -14,7 +14,7 @@ export type LinkedInAlertJob = {
   company: string;
   location?: string;
   jobUrl: string;
-  sourceJobId?: string;
+  sourceJobId: string;
 };
 
 type RawListing = {
@@ -29,6 +29,13 @@ const VIEW_JOB_LABEL = /^view job\b/i;
 const SEPARATOR_LINE = /^[-=_*·•\s]+$/;
 const CARD_TEXT_SEPARATOR = /[·•|]/;
 const NON_CONTENT_TAGS = new Set(["HEAD", "SCRIPT", "STYLE", "TITLE"]);
+/**
+ * Most job links read from one email. Real alerts carry up to about three
+ * links per listing; the cap bounds parse time for crafted emails.
+ */
+export const LINKEDIN_ALERT_MAX_JOB_LINKS = 100;
+/** Most ancestors climbed from a title link when looking for its card. */
+const MAX_CARD_DEPTH = 10;
 
 export function isLinkedInAlertSender(parsed: ParsedMail): boolean {
   const address = parsed.from?.value[0]?.address?.trim().toLowerCase();
@@ -44,6 +51,7 @@ function parseTextListings(text: string): RawListing[] {
   const listings: RawListing[] = [];
   let block: string[] = [];
   for (const rawLine of text.split(/\r?\n/)) {
+    if (listings.length >= LINKEDIN_ALERT_MAX_JOB_LINKS) break;
     const line = normalizeWhitespace(rawLine);
     if (!line || SEPARATOR_LINE.test(line)) {
       block = [];
@@ -51,7 +59,7 @@ function parseTextListings(text: string): RawListing[] {
     }
     const href = URL_PATTERN.exec(line)?.[0];
     if (href) {
-      if (VIEW_JOB_LABEL.test(line) || isLinkedInJobLink(href)) {
+      if (VIEW_JOB_LABEL.test(line) || normalizeLinkedInJobUrl(href)) {
         const [title, company, location] = block.slice(-3);
         listings.push({ title, company, location, href });
       }
@@ -82,14 +90,13 @@ function cardTextSegments(element: Element): string[] {
 
 function parseHtmlListings(html: string): RawListing[] {
   const { document } = new JSDOM(html).window;
-  const jobAnchors = [...document.querySelectorAll("a[href]")].flatMap(
-    (anchor) => {
-      const href = anchor.getAttribute("href")?.trim() ?? "";
-      if (!isLinkedInJobLink(href)) return [];
-      const key = normalizeLinkedInJobUrl(href)?.sourceJobId ?? href;
-      return [{ anchor, href, key }];
-    },
-  );
+  const jobAnchors: Array<{ anchor: Element; href: string; key: string }> = [];
+  for (const anchor of document.querySelectorAll("a[href]")) {
+    if (jobAnchors.length >= LINKEDIN_ALERT_MAX_JOB_LINKS) break;
+    const href = anchor.getAttribute("href")?.trim() ?? "";
+    const url = normalizeLinkedInJobUrl(href);
+    if (url) jobAnchors.push({ anchor, href, key: url.sourceJobId });
+  }
 
   const keys = [...new Set(jobAnchors.map((entry) => entry.key))];
   return keys.flatMap((key) => {
@@ -101,19 +108,19 @@ function parseHtmlListings(html: string): RawListing[] {
     if (!titled) return [];
 
     // The card is the closest ancestor with text of its own that holds no
-    // other job's link.
+    // other job's link, at most MAX_CARD_DEPTH levels up.
     let segments: string[] = [];
-    for (
-      let element = titled.anchor.parentElement;
-      element && element !== document.documentElement;
-      element = element.parentElement
-    ) {
+    let element = titled.anchor.parentElement;
+    for (let depth = 0; depth < MAX_CARD_DEPTH; depth += 1) {
+      if (!element || element === document.documentElement) break;
+      const card = element;
       const holdsOtherJob = jobAnchors.some(
-        (entry) => entry.key !== key && element?.contains(entry.anchor),
+        (entry) => entry.key !== key && card.contains(entry.anchor),
       );
       if (holdsOtherJob) break;
-      segments = cardTextSegments(element);
+      segments = cardTextSegments(card);
       if (segments.length > 0) break;
+      element = card.parentElement;
     }
 
     const [company, location] = segments;
@@ -130,8 +137,9 @@ function parseHtmlListings(html: string): RawListing[] {
 
 /**
  * Job listings in a LinkedIn alert email: the text/plain part when there is
- * one, otherwise the HTML. Listings without a title, company or usable link
- * are dropped, and repeats of a job URL are collapsed.
+ * one, otherwise the HTML. Listings without a title, company or a link that
+ * normalises to a LinkedIn job page are dropped, and repeats of a job URL are
+ * collapsed. At most LINKEDIN_ALERT_MAX_JOB_LINKS job links are read.
  */
 export function parseLinkedInAlertEmail(
   parsed: ParsedMail,
@@ -155,7 +163,7 @@ export function parseLinkedInAlertEmail(
       company,
       ...(location ? { location } : {}),
       jobUrl: url.jobUrl,
-      ...(url.sourceJobId ? { sourceJobId: url.sourceJobId } : {}),
+      sourceJobId: url.sourceJobId,
     });
   }
   return [...jobs.values()];
