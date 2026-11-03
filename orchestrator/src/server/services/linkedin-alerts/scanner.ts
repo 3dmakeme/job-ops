@@ -5,7 +5,9 @@ import { getPostApplicationIntegration } from "@server/repositories/post-applica
 import {
   createImapClient,
   IMAP_MAX_MESSAGE_BYTES,
+  ImapAuthenticationError,
   type ImapConnectionConfig,
+  ImapConnectionError,
   type ImapFetchedMessage,
 } from "@server/services/post-application/ingestion/imap-client";
 import {
@@ -26,6 +28,7 @@ const LINKEDIN_ALERT_SEARCH_FROM = "linkedin.com";
 const LINKEDIN_ALERT_MAX_MESSAGES = 100;
 const IMAP_ACCOUNT_KEY = "default";
 const NOT_CONNECTED_ERROR = "LinkedIn alerts: no IMAP account connected";
+const SCAN_FAILED_ERROR = "LinkedIn alerts: scan failed";
 
 export type LinkedInAlertScanResult = {
   jobs: LinkedInAlertJob[];
@@ -113,9 +116,16 @@ export async function scanLinkedInAlertEmails(): Promise<LinkedInAlertScanResult
       step: "discover-linkedin-alerts",
       error: sanitizeUnknown(error),
     });
+    // IMAP errors carry fixed messages without server responses; anything
+    // else stays in the server log only.
+    const imapError =
+      error instanceof ImapAuthenticationError ||
+      error instanceof ImapConnectionError;
     return {
       jobs: [],
-      error: `LinkedIn alerts: ${error instanceof Error ? error.message : "unknown error"}`,
+      error: imapError
+        ? `LinkedIn alerts: ${error.message}`
+        : SCAN_FAILED_ERROR,
     };
   }
 

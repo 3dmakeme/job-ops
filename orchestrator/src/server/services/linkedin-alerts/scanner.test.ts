@@ -209,8 +209,8 @@ describe("scanLinkedInAlertEmails", () => {
     expect(mocks.client.close).toHaveBeenCalledTimes(1);
 
     expect(result.error).toBeNull();
+    // Fixture (d) has no derivable job id, so it gives no listing.
     expect(result.jobs.map((job) => job.jobUrl)).toEqual([
-      "https://www.linkedin.com/comm/jobs/view/backend-developer-at-example-labs/?trackingId=xyz",
       "https://www.linkedin.com/jobs/view/4087654321",
       "https://www.linkedin.com/jobs/view/4087654322",
       "https://www.linkedin.com/jobs/view/4012345678",
@@ -228,7 +228,7 @@ describe("scanLinkedInAlertEmails", () => {
       selectedCount: 4,
       skippedCount: 0,
       matchedSenderCount: 3,
-      listingCount: 6,
+      listingCount: 5,
     });
     expectNoIntegrationWrites();
     expectNoMailboxWrites();
@@ -344,6 +344,40 @@ describe("scanLinkedInAlertEmails", () => {
     expect(mocks.client.close).toHaveBeenCalledTimes(1);
   });
 
+  it("reports a generic source error for a non-IMAP failure and logs it", async () => {
+    mocks.getPostApplicationIntegration.mockRejectedValue(
+      new Error("SQLITE_BUSY: database is locked at /data/jobs.db"),
+    );
+
+    const result = await scanLinkedInAlertEmails();
+
+    expect(result).toEqual({
+      jobs: [],
+      error: "LinkedIn alerts: scan failed",
+    });
+    expect(mocks.createImapClient).not.toHaveBeenCalled();
+    expect(mocks.warn).toHaveBeenCalledWith(
+      "LinkedIn alerts inbox scan failed",
+      {
+        step: "discover-linkedin-alerts",
+        error: expect.objectContaining({
+          message: expect.stringContaining("SQLITE_BUSY"),
+        }),
+      },
+    );
+  });
+
+  it("does not copy a non-IMAP error from the inbox read into source errors", async () => {
+    mocks.client.fetchMessageSizes.mockRejectedValue(
+      new TypeError("Cannot read properties of undefined (reading 'size')"),
+    );
+
+    const result = await scanLinkedInAlertEmails();
+
+    expect(result.error).toBe("LinkedIn alerts: scan failed");
+    expect(mocks.client.close).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     [
       "no integration",
@@ -394,7 +428,7 @@ describe("scanLinkedInAlertEmails", () => {
     const result = await scanLinkedInAlertEmails();
 
     expect(result.error).toBeNull();
-    expect(result.jobs).toHaveLength(4);
+    expect(result.jobs).toHaveLength(3);
     expect(mocks.warn).toHaveBeenCalledWith(
       "LinkedIn alert email could not be parsed; skipping",
       { step: "discover-linkedin-alerts", uid: 102 },
