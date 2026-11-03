@@ -867,6 +867,13 @@ export const settingsRegistry = {
       value: ChatStyleManualLanguage | null | undefined,
     ): string | null => value ?? null,
   },
+  linkedinAlertsEnabled: {
+    kind: "typed" as const,
+    schema: z.boolean(),
+    default: (): boolean => false,
+    parse: parseBitBoolOrNull,
+    serialize: serializeBitBool,
+  },
   backupEnabled: {
     kind: "typed" as const,
     schema: z.boolean(),

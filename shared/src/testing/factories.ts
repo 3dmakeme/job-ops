@@ -333,6 +333,7 @@ export const createAppSettings = (
   adzunaAppKeyHint: null,
   apifyTokenHint: null,
   webhookSecretHint: null,
+  linkedinAlertsEnabled: { value: false, default: false, override: null },
   backupEnabled: { value: false, default: false, override: null },
   backupHour: { value: 3, default: 3, override: null },
   backupMaxCount: { value: 7, default: 7, override: null },
