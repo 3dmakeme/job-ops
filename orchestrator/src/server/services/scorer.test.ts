@@ -2,6 +2,7 @@
  * Tests for scorer.ts - focusing on robust JSON parsing from AI responses
  */
 
+import { logger } from "@infra/logger";
 import { createJob } from "@shared/testing/factories";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -1236,6 +1237,36 @@ describe("Jev scoring engine", () => {
     const result = await scoreJobSuitability(job(), {});
     expect(result.score).toBe(77);
     expect(result.reason).toBe("LLM reason");
+  });
+
+  it.each([
+    ["empty", ""],
+    ["whitespace-only", "   \n\t "],
+    ["HTML-only", "<p> </p><br/>"],
+    ["null", null],
+  ])("skips Jev without a warning for a %s description", async (_label, jobDescription) => {
+    const warnSpy = vi.spyOn(logger, "warn");
+    const { scoreJobSuitability } = await import("./scorer");
+    const result = await scoreJobSuitability(
+      createJob({ id: "jev-job", jobDescription }),
+      {},
+    );
+    expect(scoreJobWithJevMock).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(result.score).toBe(77);
+    expect(result.reason).toBe("LLM reason");
+    warnSpy.mockRestore();
+  });
+
+  it("still calls Jev for a job with a description", async () => {
+    scoreJobWithJevMock.mockResolvedValue({
+      score: 60,
+      reason: "jev ok",
+      parts: {},
+    });
+    const { scoreJobSuitability } = await import("./scorer");
+    await scoreJobSuitability(job(), {});
+    expect(scoreJobWithJevMock).toHaveBeenCalledTimes(1);
   });
 
   it("generateJobBrief never calls Jev and returns only the brief", async () => {
