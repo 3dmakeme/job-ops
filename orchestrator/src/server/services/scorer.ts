@@ -297,9 +297,14 @@ export async function scoreJobSuitability(
 
   // Jev scores first. Below the brief cutoff the LLM is skipped entirely and
   // the brief is generated when the job is first opened. A Jev failure falls
-  // through to the LLM, exactly as if Jev were not selected.
+  // through to the LLM, exactly as if Jev were not selected. Jobs with no
+  // description go straight to the LLM, since Jev has nothing to score.
   let jevScore: Awaited<ReturnType<typeof scoreJobWithJev>> | null = null;
-  if (!options.briefOnly && (await shouldUseJev("scoringEngine"))) {
+  if (
+    !options.briefOnly &&
+    stripHtmlTags(job.jobDescription ?? "").trim() &&
+    (await shouldUseJev("scoringEngine"))
+  ) {
     try {
       jevScore = await scoreJobWithJev(job, profile);
     } catch (error) {
